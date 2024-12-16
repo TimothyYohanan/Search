@@ -1,0 +1,3 @@
+src/Graphics/VulkanDevice is unfinished. There are several annotated elements that are not properly cleaned up in the destructor.
+
+ImGui_Binding::RenderFrame() uses an unchecked pointer, which is potentially dangerous.

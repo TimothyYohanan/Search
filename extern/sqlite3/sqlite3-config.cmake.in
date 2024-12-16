@@ -1,0 +1,14 @@
+# - Config file for the sqlite3 package
+# It defines the following variables:
+#  sqlite3_INCLUDE_DIR      - include directory
+#  sqlite3_LIBRARY_DIR      - directory containing libraries
+#  sqlite3_LIBRARIES        - libraries to link against
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+include(@SYSCONFIG_INSTALL_DIR@/@PACKAGE_NAME@-targets.cmake)
+
+set(@PACKAGE_NAME@_INCLUDE_DIR "@INSTALL_INCLUDE_DIR@")
+set(@PACKAGE_NAME@_LIBRARY_DIR "@INSTALL_LIB_DIR@")
+set(sqlite3_LIBRARIES "@PACKAGE_NAMESPACE@@PACKAGE_NAME@")

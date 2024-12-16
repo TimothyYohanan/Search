@@ -1,0 +1,11 @@
+prefix=/Users/timothyyohanan/Desktop/mvl_toolkit_archive/mvl_toolkit_v0.0.3/library
+exec_prefix=${prefix}
+includedir=/Users/timothyyohanan/Desktop/mvl_toolkit_archive/mvl_toolkit_v0.0.3/library/include
+libdir=/Users/timothyyohanan/Desktop/mvl_toolkit_archive/mvl_toolkit_v0.0.3/library/lib
+
+Name: Yaml-cpp
+Description: A YAML parser and emitter for C++
+Version: 0.7.0
+Requires:
+Libs: -L${libdir} -lyaml-cpp
+Cflags: -I${includedir}

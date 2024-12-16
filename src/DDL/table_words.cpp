@@ -1,0 +1,42 @@
+#include "table_words.h"
+
+const char* DDL_CREATE_TABLE_IF_NOT_EXISTS_WORDS = R"(
+CREATE TABLE IF NOT EXISTS Words (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    word TEXT NOT NULL UNIQUE
+);
+
+CREATE INDEX IF NOT EXISTS idx_words ON Words(word);
+)";
+
+const char* DMC_ANALYZE_WORDS = R"(
+    ANALYZE Words;
+)";
+
+const char* DML_INSERT_WORD = R"(
+    INSERT INTO Words (word) VALUES (?);
+)";
+
+const char* DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_EQUALS = R"(
+    EXPLAIN QUERY PLAN SELECT id FROM Words WHERE word = ?;
+)";
+
+const char* DML_SELECT_ID_FROM_WORDS_WHERE_WORD_EQUALS = R"(
+    SELECT id FROM Words WHERE word = ?;
+)";
+
+const char* DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE = R"(
+    EXPLAIN QUERY PLAN SELECT id FROM Words WHERE word LIKE ?;
+)";
+
+const char* DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE = R"(
+    SELECT id FROM Words WHERE word LIKE ?;
+)";
+
+const char* DML_SELECT_ID_WORD_FROM_WORDS_WHERE_WORD_EQUALS = R"(
+    SELECT id, word FROM Words WHERE word = ?;
+)";
+
+const char* DML_SELECT_ID_WORD_FROM_WORDS_WHERE_WORD_LIKE = R"(
+    SELECT id, word FROM Words WHERE word LIKE ?;
+)";

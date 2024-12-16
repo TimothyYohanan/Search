@@ -1,0 +1,11 @@
+the final two queries in the search take up the bulk of the query time, and they are slowest when the input is 1 or 2 characters.
+combining the final two queries with a JOIN statement should improve the overall query speed.
+
+To acheive target execution speeds, I may need to pool 2-3 connections to the database.
+
+the sorting method used to rank search results is a placeholder for application-specific methods.
+the placeholder functions are:
+    Search::calculateParagraphScores()
+	Search::rankParagraphs()
+	Search::rankParagraphIds()
+

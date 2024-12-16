@@ -1,0 +1,28 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "/usr/include/c++/11",
+                "/usr/include/c++/11/x86_64-redhat-linux",
+                "/usr/include",
+                "/usr/local/include",
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/extern/imgui",
+                "${workspaceFolder}/extern"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/clang++",
+            "intelliSenseMode": "clang-x64",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "browse": {
+                "path": [
+                    "/usr/include",
+                    "/usr/local/include"
+                ]
+            }
+        }
+    ],
+    "version": 4
+}

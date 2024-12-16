@@ -1,0 +1,1 @@
+sudo dnf install llvm llvm-devel clang cmake vulkan-devel glfw-devel
