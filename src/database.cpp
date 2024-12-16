@@ -850,14 +850,14 @@ vector<string> Database::QueryParagraphsTableReturnOriginalText_Fast_Unordered(c
 #endif
         sqlite3_stmt* stmt = nullptr;
 
-        string statement_text = string(DML_SELECT_ORIGINAL_TEXT_FROM_PARAGRAPHS_WHERE_ID_EQUALS_PART_1);
+        string statement_text = string(DML_SELECT_ORIGINAL_TEXT_FROM_PARAGRAPHS_WHERE_ID_IN_PART_1);
         for (size_t i = 0; i < paragraph_ids.size(); ++i) {
             statement_text += to_string(paragraph_ids[i]);
             if (i != paragraph_ids.size() - 1) {
                 statement_text += ", ";
             }
         }
-        statement_text += DML_SELECT_ORIGINAL_TEXT_FROM_PARAGRAPHS_WHERE_ID_EQUALS_PART_2;
+        statement_text += DML_SELECT_ORIGINAL_TEXT_FROM_PARAGRAPHS_WHERE_ID_IN_PART_2;
 
         rc = sqlite3_prepare_v2(db, statement_text.c_str(), -1, &stmt, 0);
         if (rc != SQLITE_OK) 

@@ -13,30 +13,6 @@ CREATE TABLE IF NOT EXISTS WordsToParagraphs (
 CREATE INDEX IF NOT EXISTS idx_word_id ON WordsToParagraphs(word_id);
 CREATE INDEX IF NOT EXISTS idx_paragraph_id ON WordsToParagraphs(paragraph_id);
 CREATE INDEX IF NOT EXISTS idx_word_and_paragraph_id ON WordsToParagraphs(word_id, paragraph_id);
-
--- Trigger to delete a word if it has no other associations after deleting a paragraph
-CREATE TRIGGER IF NOT EXISTS delete_word_if_no_paragraphs
-AFTER DELETE ON Paragraphs
-FOR EACH ROW
-BEGIN
-    DELETE FROM Words
-    WHERE id = OLD.id 
-      AND NOT EXISTS (
-          SELECT 1 FROM WordsToParagraphs 
-          WHERE word_id = OLD.id
-          LIMIT 1
-      );
-END;
-
--- Trigger to delete all paragraphs associated with a word when the word is deleted
-CREATE TRIGGER IF NOT EXISTS delete_paragraphs_when_word_deleted
-BEFORE DELETE ON Words
-FOR EACH ROW
-BEGIN
-    DELETE FROM Paragraphs
-    WHERE id IN (SELECT paragraph_id FROM WordsToParagraphs WHERE word_id = OLD.id);
-END;
-
 )";
 
 const char* DMC_ANALYZE_WORDS_TO_PARAGRAPHS = R"(
@@ -58,7 +34,10 @@ const char* DML_SELECT_COMPOUND_QUERY_1 = R"(
     ORDER BY subquery.paragraph_id, subquery.word_position;
 )";
 
-const char* DML_SELECT_COMPOUND_QUERY_1_PART_1 = R"(
+/*
+* Note that these use the IN clause instead of the EQUALS clause, compared to DML_SELECT_COMPOUND_QUERY_1
+*/
+const char* DML_SELECT_COMPOUND_QUERY_1_PART_1 = R"( 
     SELECT subquery.paragraph_id, subquery.word_id 
     FROM WordsToParagraphs subquery 
     WHERE subquery.paragraph_id IN (
