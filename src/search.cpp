@@ -42,88 +42,141 @@ void Search::Destroy()
 
 inline const WordMatch Search::getMatches(Database* db_prechecked, const string& normalized_word)
 {
-    const vector<int64_t> exact_match = db_prechecked->QueryWordsTableReturnIds(normalized_word, TextQueryType::EXACT_MATCH);
-    vector<int64_t> partial_matches = (normalized_word.size() == 1) ?
-        db_prechecked->QueryWordsTableReturnIds(normalized_word, TextQueryType::BEGINS_WITH) :
-        db_prechecked->QueryWordsTableReturnIds(normalized_word, TextQueryType::CONTAINS);
-    if (exact_match.empty())
+    const vector<tuple<int64_t, string, int64_t, vector<int64_t>>> exact_matches = db_prechecked->GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(normalized_word, TextQueryType::EXACT_MATCH);
+
+    vector<tuple<int64_t, string, int64_t, vector<int64_t>>> partial_matches = (normalized_word.size() == 1) ?
+        db_prechecked->GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(normalized_word, TextQueryType::BEGINS_WITH) :
+        db_prechecked->GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(normalized_word, TextQueryType::CONTAINS);
+
+    if (exact_matches.empty())
     {
-        const vector<pair<int64_t, vector<int64_t>>> partial_match_data = db_prechecked->QueryWordsToParagraphsTableReturnUniqueParagraphIdsAndAllWordIdsForTheParagraphInOrder(partial_matches);
-        return WordMatch(normalized_word, partial_matches, partial_match_data);
-    } else if (exact_match.size() > 1)
-    {
-        cout << "searchBarInputCallback() - ERROR: found more than one exact matches. This should be impossible." << endl;
-        exit(EXIT_FAILURE);
+        if (!partial_matches.empty())
+        {
+            vector<int64_t> partial_match_idxs;
+            vector<tuple<int64_t, string, vector<int64_t>>> partial_match_data;
+
+            partial_match_idxs.reserve(partial_matches.size());
+            partial_match_data.reserve(partial_matches.size());
+
+            for (const tuple<int64_t, string, int64_t, vector<int64_t>>& data : partial_matches)
+            {
+                partial_match_idxs.push_back(get<2>(data));
+                partial_match_data.push_back(tuple(get<0>(data), get<1>(data), get<3>(data)));
+            }
+
+            return WordMatch(normalized_word, partial_match_idxs, partial_match_data);
+        } else
+        {
+            cout << "searchBarInputCallback() - WARNING: did not find any exact matches, and did not find any partial matches." << endl;
+        }
     } else
     {
-        const int64_t exact_match_idx = exact_match[0];
-        const vector<int64_t>::iterator it = find(partial_matches.begin(), partial_matches.end(), exact_match_idx);
 
-        if (it != partial_matches.end()) {
-            partial_matches.erase(it);
+#ifdef SEARCH_CHECK_FOR_ASSUMED_IMPOSSIBLE_ERRORS
+    int64_t idx = get<2>(exact_matches[0]);
+    for (const tuple<int64_t, string, int64_t, vector<int64_t>>& match : exact_matches)
+    {
+        if (get<2>(match) != idx)
+        {
+            cerr << "searchBarInputCallback() - ERROR: Found more than 1 word in the words database that was an exact match to the input '" << normalized_word <<"'" << endl;
+            for (const tuple<int64_t, string, int64_t, vector<int64_t>>& match : exact_matches)
+            {
+                cerr << "   Note: matched paragraph id: " << get<0>(match) << ", word id: " << get<2>(match) << endl;
+            }
+            exit(EXIT_FAILURE);
+        }
+    }
+#endif
+
+        const int64_t exact_match_idx = get<2>(exact_matches[0]);
+        vector<tuple<int64_t, string, vector<int64_t>>> exact_match_data;
+
+        exact_match_data.reserve(exact_matches.size());
+
+        vector<int64_t> partial_match_idxs;
+        vector<tuple<int64_t, string, vector<int64_t>>> partial_match_data;
+
+        partial_match_idxs.reserve(partial_matches.size());
+        partial_match_data.reserve(partial_matches.size());
+
+        for (const tuple<int64_t, string, int64_t, vector<int64_t>>& data : exact_matches)
+        {
+            exact_match_data.push_back(tuple(get<0>(data), get<1>(data), get<3>(data)));
         }
 
-        const vector<pair<int64_t, vector<int64_t>>> exact_match_data = db_prechecked->QueryWordsToParagraphsTableReturnUniqueParagraphIdsAndAllWordIdsForTheParagraphInOrder(exact_match_idx);
-        const vector<pair<int64_t, vector<int64_t>>> partial_match_data = db_prechecked->QueryWordsToParagraphsTableReturnUniqueParagraphIdsAndAllWordIdsForTheParagraphInOrder(partial_matches);
+        for (const tuple<int64_t, string, int64_t, vector<int64_t>>& data : partial_matches)
+        {
+            const int64_t partial_match_idx = get<2>(data);
+            if (partial_match_idx != exact_match_idx)
+            {
+                partial_match_idxs.push_back(partial_match_idx);
+                partial_match_data.push_back(tuple(get<0>(data), get<1>(data), get<3>(data)));
+            }
+        }
 
-        return WordMatch(normalized_word, exact_match_idx, exact_match_data, partial_matches, partial_match_data);
+        return WordMatch(normalized_word, exact_match_idx, exact_match_data, partial_match_idxs, partial_match_data);
     }
 }
 
-unordered_map<int64_t, pair<int, int>> Search::calculateParagraphScores(const vector<WordMatch>& matches) {
-    unordered_map<int64_t, pair<int, int>> paragraphScores;
+inline unordered_map<int64_t, pair<pair<int, int>, string>> Search::calculateParagraphScores(const vector<WordMatch>& matches) {
+    unordered_map<int64_t, pair<pair<int, int>, string>> paragraphScores;
 
     for (const auto& wordMatch : matches) {
         for (const auto& exactMatch : wordMatch.exact_match_data) {
-            int64_t paragraphId = exactMatch.first;
-            paragraphScores[paragraphId].first++;
+            int64_t paragraphId = get<0>(exactMatch);
+            string originalText = get<1>(exactMatch);
+            paragraphScores[paragraphId].first.first++;
+            if (paragraphScores[paragraphId].second.empty()) {
+                paragraphScores[paragraphId].second = originalText;
+            }
         }
 
         for (const auto& partialMatch : wordMatch.partial_match_data) {
-            int64_t paragraphId = partialMatch.first;
-            paragraphScores[paragraphId].second++;
+            int64_t paragraphId = get<0>(partialMatch);
+            string originalText = get<1>(partialMatch);
+            paragraphScores[paragraphId].first.second++;
+            if (paragraphScores[paragraphId].second.empty()) {
+                paragraphScores[paragraphId].second = originalText;
+            }
         }
     }
 
     return paragraphScores;
 }
 
-bool Search::rankParagraphs(const pair<int64_t, pair<int, int>>& a, const pair<int64_t, pair<int, int>>& b) {
-    int exactA = a.second.first;
-    int partialA = a.second.second;
-    int exactB = b.second.first;
-    int partialB = b.second.second;
+inline bool Search::rankParagraphs(const pair<int64_t, pair<pair<int, int>, string>>& a, const pair<int64_t, pair<pair<int, int>, string>>& b) {
+    int exactA = a.second.first.first;
+    int partialA = a.second.first.second;
+    int exactB = b.second.first.first;
+    int partialB = b.second.first.second;
 
-    // First prioritize by the number of exact matches
     if (exactA != exactB) {
         return exactA > exactB;
     }
 
-    // If exact matches are the same, prioritize by the number of partial matches
     if (partialA != partialB) {
         return partialA > partialB;
     }
 
-    // If both exact and partial match counts are the same, prioritize by paragraph ID (earlier comes first)
     return a.first < b.first;
 }
 
-vector<int64_t> Search::rankParagraphIds(const vector<WordMatch>& matches) {
-    unordered_map<int64_t, pair<int, int>> paragraphScores = calculateParagraphScores(matches);
+inline vector<pair<int64_t, string>> Search::rankParagraphIds(const vector<WordMatch>& matches) {
+    unordered_map<int64_t, pair<pair<int, int>, string>> paragraphScores = calculateParagraphScores(matches);
 
-    vector<pair<int64_t, pair<int, int>>> paragraphScoreList;
+    vector<pair<int64_t, pair<pair<int, int>, string>>> paragraphScoreList;
     for (const auto& entry : paragraphScores) {
         paragraphScoreList.push_back(entry);
     }
 
     sort(paragraphScoreList.begin(), paragraphScoreList.end(), rankParagraphs);
 
-    vector<int64_t> rankedParagraphIds;
+    vector<pair<int64_t, string>> rankedParagraphsWithText;
     for (const auto& entry : paragraphScoreList) {
-        rankedParagraphIds.push_back(entry.first);
+        rankedParagraphsWithText.push_back({entry.first, entry.second.second});
     }
 
-    return rankedParagraphIds;
+    return rankedParagraphsWithText;
 }
 
 int Search::searchBarInputCallback(ImGuiInputTextCallbackData* data) {
@@ -206,8 +259,12 @@ int Search::searchBarInputCallback(ImGuiInputTextCallbackData* data) {
                 }
             }
 
-            const vector<int64_t> rankedParagraphIds = rankParagraphIds(SearchProgress);
-            SearchResults = db->QueryParagraphsTableReturnOriginalText_Slow_Ordered(rankedParagraphIds);
+            const vector<pair<int64_t, string>> rankedParagraphIds = rankParagraphIds(SearchProgress);
+            SearchResults.clear();
+            SearchResults.reserve(rankedParagraphIds.size());
+            for (const auto& entry : rankedParagraphIds) {
+                SearchResults.push_back(entry.second);
+            }
 
 
 #ifdef SEARCH_LOG_EXECUTION_TIMES

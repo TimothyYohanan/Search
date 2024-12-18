@@ -1,7 +1,8 @@
 #pragma once
 
 // #define DATABASE_EXPLAIN_QUERY_PLANS    // uncomment this line to log explainations of query plans to the console
-#define DATABASE_LOG_EXECUTION_TIMES    // uncomment this line to log execution times to the console
+// #define DATABASE_LOG_EXECUTION_TIMES    // uncomment this line to log execution times to the console
+// #define DATABASE_LOG_PREPARED_STATEMENTS    // uncomment this line to log prepared statements to the console before they are executed
 #define MAX_WORD_SIZE (static_cast<size_t>(45))
 #define MAX_PARAGRAPH_SIZE (static_cast<size_t>(200))
 #define LOAD_TEST_DATA        // uncomment this line to load test data into the database upon initialization
@@ -47,22 +48,13 @@ public:
 
     vector<int64_t> QueryWordsTableReturnIds(const string& normalized_word, const TextQueryType Type);
 
-    pair<vector<int64_t>, vector<string>> QueryWordsTableReturnIdsWords(const string& normalized_word, const TextQueryType Type);
-
-    vector<string> QueryParagraphsTableReturnOriginalText_Slow_Ordered(const vector<int64_t> paragraph_ids);
-
-    vector<string> QueryParagraphsTableReturnOriginalText_Fast_Unordered(const vector<int64_t> paragraph_ids);
-
     /*
-    * Haha.
-    * I didn't know what else to call this function.
-    * 
-    * The output is a vector full of:
-    *   pair.first: paragraph id (unique - each paragraph will only occur once)
-    *   pair.second: a vector containing all of the word id's in that paragraph, in the order that they occur in that paragraph.
+    * get<0>(vector[i]) = paragraph id (unique - each paragraph will only occur once)
+    * get<1>(vector[i]) = paragraph original text
+    * get<2>(vector[i]) = the matched word id
+    * get<3>(vector[i]) = a vector containing all of the word ids in the paragraph, in the order that they occur in that paragraph
     */
-    vector<pair<int64_t, vector<int64_t>>> QueryWordsToParagraphsTableReturnUniqueParagraphIdsAndAllWordIdsForTheParagraphInOrder(const int64_t word_id);
-    vector<pair<int64_t, vector<int64_t>>> QueryWordsToParagraphsTableReturnUniqueParagraphIdsAndAllWordIdsForTheParagraphInOrder(const vector<int64_t> word_ids);
+    vector<tuple<int64_t, string, int64_t, vector<int64_t>>> GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(const string& normalized_word, const TextQueryType Type);
 
     bool BeginTransaction(const string TransactionName, const bool FailureUpsetsDatabaseValidity);
 

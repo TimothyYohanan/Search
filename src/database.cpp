@@ -507,6 +507,11 @@ bool Database::ExplainWordsTableQueryPlan(const string& normalized_word, const T
             return false;
         }
 
+#ifdef DATABASE_LOG_PREPARED_STATEMENTS
+        const char* prepared_statement = sqlite3_expanded_sql(stmt);
+        cout << prepared_statement << endl;
+#endif
+
         do
         {
             rc = sqlite3_step(stmt);
@@ -611,6 +616,11 @@ vector<int64_t> Database::QueryWordsTableReturnIds(const string& normalized_word
             return results;
         }
 
+#ifdef DATABASE_LOG_PREPARED_STATEMENTS
+        const char* prepared_statement = sqlite3_expanded_sql(stmt);
+        cout << prepared_statement << endl;
+#endif
+
         do
         {
             rc = sqlite3_step(stmt);
@@ -649,265 +659,14 @@ vector<int64_t> Database::QueryWordsTableReturnIds(const string& normalized_word
     return results;
 }
 
-pair<vector<int64_t>, vector<string>> Database::QueryWordsTableReturnIdsWords(const string& normalized_word, const TextQueryType Type)
+vector<tuple<int64_t, string, int64_t, vector<int64_t>>> Database::GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(const string& normalized_word, const TextQueryType Type)
 {
-    pair<vector<int64_t>, vector<string>> results = {};
+    vector<tuple<int64_t, string, int64_t, vector<int64_t>>> results = {};
 
-    if (!normalized_word.empty())
+    if (normalized_word.empty())
     {
-#ifdef DATABASE_LOG_EXECUTION_TIMES
-        chrono::_V2::system_clock::time_point t0  = chrono::_V2::system_clock::time_point();
-        chrono::_V2::system_clock::time_point t1  = chrono::_V2::system_clock::time_point();
-
-        t0  = chrono::high_resolution_clock::now();
-#endif
-        sqlite3_stmt* stmt = nullptr;
-
-        switch (Type)
-        {
-            case EXACT_MATCH:
-            {
-                rc = sqlite3_prepare_v2(db, DML_SELECT_ID_WORD_FROM_WORDS_WHERE_WORD_EQUALS, -1, &stmt, 0);
-                break;
-            }
-            case BEGINS_WITH:
-            {
-                rc = sqlite3_prepare_v2(db, DML_SELECT_ID_WORD_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
-                break;
-            }
-            case ENDS_WITH:
-            {
-                rc = sqlite3_prepare_v2(db, DML_SELECT_ID_WORD_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
-                break;
-            }
-            case CONTAINS:
-            {
-                rc = sqlite3_prepare_v2(db, DML_SELECT_ID_WORD_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
-                break;
-            }
-        }
-        if (rc != SQLITE_OK) 
-        {
-            cerr << "Err: " << rc << " Failed to prepare query statement for words: " << sqlite3_errmsg(db) << endl;
-            sqlite3_finalize(stmt);
-            return results;
-        }
-
-        switch (Type)
-        {
-            case EXACT_MATCH:
-            {
-                rc = sqlite3_bind_text(stmt, 1, normalized_word.c_str(), -1, SQLITE_STATIC);
-                break;
-            }
-            case BEGINS_WITH:
-            {
-                rc = sqlite3_bind_text(stmt, 1, (normalized_word + "%").c_str(), -1, SQLITE_STATIC);
-                break;
-            }
-            case ENDS_WITH:
-            {
-                rc = sqlite3_bind_text(stmt, 1, ("%" + normalized_word).c_str(), -1, SQLITE_STATIC);
-                break;
-            }
-            case CONTAINS:
-            {
-                rc = sqlite3_bind_text(stmt, 1, ("%" + normalized_word + "%").c_str(), -1, SQLITE_STATIC);
-                break;
-            }
-        }
-        if (rc != SQLITE_OK) 
-        {
-            cerr << "Err: " << rc << " Failed to bind text to the query statement for words: " << sqlite3_errmsg(db) << endl;
-            sqlite3_finalize(stmt);
-            return results;
-        }
-
-        do
-        {
-            rc = sqlite3_step(stmt);
-
-            if (rc == SQLITE_ROW) 
-            {
-                int64_t id = sqlite3_column_int64(stmt, 0); 
-                const char * word = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-                results.first.push_back(id);
-                results.second.push_back(word);
-            } else if (rc != SQLITE_DONE) 
-            {
-                cerr << "Err: " << rc << " Error while querying word '" << normalized_word.c_str() << "': " << sqlite3_errmsg(db) << endl;
-            }
-
-        } while (rc == SQLITE_ROW);
-
-        if (rc != SQLITE_DONE) 
-        {
-            cerr << "Err: " << rc << " Error while querying word '" << normalized_word.c_str() << "': " << sqlite3_errmsg(db) << endl;
-        }
-
-#ifdef DATABASE_LOG_EXECUTION_TIMES
-        t1  = chrono::high_resolution_clock::now();
-        auto duration = chrono::duration_cast<chrono::microseconds>(t1 - t0);
-        cout << "Time taken to query words table: " << duration.count() << " microseconds" << endl;
-#endif
-#ifdef DATABASE_EXPLAIN_QUERY_PLANS
-        ExplainWordsTableQueryPlan(normalized_word, Type);
-        const int scanStepsCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_FULLSCAN_STEP, 0);
-        const int sortCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_SORT, 0);
-        const int autoIdxCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_AUTOINDEX, 0);
-
-        cout << "Scan Steps: " << scanStepsCt << " Sort Count: " << sortCt << " Auto Index Count: " << autoIdxCt << endl;
-#endif
-        sqlite3_finalize(stmt);
+        return results;
     }
-    return results;
-}
-
-vector<string> Database::QueryParagraphsTableReturnOriginalText_Slow_Ordered(const vector<int64_t> paragraph_ids)
-{
-    vector<string> results = {};
-
-    if (!paragraph_ids.empty())
-    {
-#ifdef DATABASE_LOG_EXECUTION_TIMES
-        chrono::_V2::system_clock::time_point t0  = chrono::_V2::system_clock::time_point();
-        chrono::_V2::system_clock::time_point t1  = chrono::_V2::system_clock::time_point();
-
-        t0  = chrono::high_resolution_clock::now();
-#endif
-        sqlite3_stmt* stmt = nullptr;
-
-        rc = sqlite3_prepare_v2(db, DML_SELECT_ORIGINAL_TEXT_FROM_PARAGRAPHS_WHERE_ID_EQUALS, -1, &stmt, 0);
-        if (rc != SQLITE_OK) 
-        {
-            cerr << "Err: " << rc << " Failed to prepare query statement for paragraphs: " << sqlite3_errmsg(db) << endl;
-            sqlite3_finalize(stmt);
-            return results;
-        }
-
-        for (const int64_t& paragraph_id : paragraph_ids)
-        {
-            rc = sqlite3_bind_int(stmt, 1, paragraph_id);
-            if (rc != SQLITE_OK) 
-            {
-                cerr << "Err: " << rc << " Failed to bind text to the query statement for paragraphs: " << sqlite3_errmsg(db) << endl;
-                sqlite3_finalize(stmt);
-                return results;
-            }
-
-            do
-            {
-                rc = sqlite3_step(stmt);
-
-                if (rc == SQLITE_ROW) 
-                {
-                    const char * original_text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                    results.push_back(string(original_text));
-                } else if (rc != SQLITE_DONE) 
-                {
-                    cerr << "Err: " << rc << " Error while querying paragraph 'id =" << paragraph_id << "': " << sqlite3_errmsg(db) << endl;
-                }
-
-            } while (rc == SQLITE_ROW);
-
-            if (rc != SQLITE_DONE) 
-            {
-                cerr << "Err: " << rc << " Error while querying paragraph 'id =" << paragraph_id << "': " << sqlite3_errmsg(db) << endl;
-            }
-
-            sqlite3_reset(stmt);
-        }
-
-#ifdef DATABASE_LOG_EXECUTION_TIMES
-        t1  = chrono::high_resolution_clock::now();
-        auto duration = chrono::duration_cast<chrono::microseconds>(t1 - t0);
-        cout << "Time taken to query paragraphs table: " << duration.count() << " microseconds" << endl;
-#endif
-#ifdef DATABASE_EXPLAIN_QUERY_PLANS
-        ExplainWordsTableQueryPlan(normalized_word, Type);
-        const int scanStepsCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_FULLSCAN_STEP, 0);
-        const int sortCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_SORT, 0);
-        const int autoIdxCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_AUTOINDEX, 0);
-
-        cout << "Scan Steps: " << scanStepsCt << " Sort Count: " << sortCt << " Auto Index Count: " << autoIdxCt << endl;
-#endif
-        sqlite3_finalize(stmt);
-    }
-    return results;
-}
-
-vector<string> Database::QueryParagraphsTableReturnOriginalText_Fast_Unordered(const vector<int64_t> paragraph_ids)
-{
-    vector<string> results = {};
-
-    if (!paragraph_ids.empty())
-    {
-#ifdef DATABASE_LOG_EXECUTION_TIMES
-        chrono::_V2::system_clock::time_point t0  = chrono::_V2::system_clock::time_point();
-        chrono::_V2::system_clock::time_point t1  = chrono::_V2::system_clock::time_point();
-
-        t0  = chrono::high_resolution_clock::now();
-#endif
-        sqlite3_stmt* stmt = nullptr;
-
-        string statement_text = string(DML_SELECT_ORIGINAL_TEXT_FROM_PARAGRAPHS_WHERE_ID_IN_PART_1);
-        for (size_t i = 0; i < paragraph_ids.size(); ++i) {
-            statement_text += to_string(paragraph_ids[i]);
-            if (i != paragraph_ids.size() - 1) {
-                statement_text += ", ";
-            }
-        }
-        statement_text += DML_SELECT_ORIGINAL_TEXT_FROM_PARAGRAPHS_WHERE_ID_IN_PART_2;
-
-        rc = sqlite3_prepare_v2(db, statement_text.c_str(), -1, &stmt, 0);
-        if (rc != SQLITE_OK) 
-        {
-            cerr << "Err: " << rc << " Failed to prepare query statement for paragraphs: " << sqlite3_errmsg(db) << endl;
-            sqlite3_finalize(stmt);
-            return results;
-        }
-
-        do
-        {
-            rc = sqlite3_step(stmt);
-
-            if (rc == SQLITE_ROW) 
-            {
-                const char * original_text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-                results.push_back(string(original_text));
-            } else if (rc != SQLITE_DONE) 
-            {
-                cerr << "Err: " << rc << " Error while querying paragraph: " << sqlite3_errmsg(db) << endl;
-            }
-
-        } while (rc == SQLITE_ROW);
-
-        if (rc != SQLITE_DONE) 
-        {
-            cerr << "Err: " << rc << " Error while querying paragraph: " << sqlite3_errmsg(db) << endl;
-        }
-
-#ifdef DATABASE_LOG_EXECUTION_TIMES
-        t1  = chrono::high_resolution_clock::now();
-        auto duration = chrono::duration_cast<chrono::microseconds>(t1 - t0);
-        cout << "Time taken to query paragraphs table: " << duration.count() << " microseconds" << endl;
-#endif
-#ifdef DATABASE_EXPLAIN_QUERY_PLANS
-        ExplainWordsTableQueryPlan(normalized_word, Type);
-        const int scanStepsCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_FULLSCAN_STEP, 0);
-        const int sortCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_SORT, 0);
-        const int autoIdxCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_AUTOINDEX, 0);
-
-        cout << "Scan Steps: " << scanStepsCt << " Sort Count: " << sortCt << " Auto Index Count: " << autoIdxCt << endl;
-#endif
-        sqlite3_finalize(stmt);
-    }
-    return results;
-}
-
-vector<pair<int64_t, vector<int64_t>>> Database::QueryWordsToParagraphsTableReturnUniqueParagraphIdsAndAllWordIdsForTheParagraphInOrder(const int64_t word_id)
-{
-    vector<pair<int64_t, vector<int64_t>>> results = {};
 
 #ifdef DATABASE_LOG_EXECUTION_TIMES
     chrono::_V2::system_clock::time_point t0  = chrono::_V2::system_clock::time_point();
@@ -917,7 +676,29 @@ vector<pair<int64_t, vector<int64_t>>> Database::QueryWordsToParagraphsTableRetu
 #endif
     sqlite3_stmt* stmt = nullptr;
 
-    rc = sqlite3_prepare_v2(db, DML_SELECT_COMPOUND_QUERY_1, -1, &stmt, 0);
+    switch (Type)
+    {
+        case EXACT_MATCH:
+        {
+            rc = sqlite3_prepare_v2(db, DML_SELECT_COMPOUND_1_EQUALS, -1, &stmt, 0);
+            break;
+        }
+        case BEGINS_WITH:
+        {
+            rc = sqlite3_prepare_v2(db, DML_SELECT_COMPOUND_1_LIKE, -1, &stmt, 0);
+            break;
+        }
+        case ENDS_WITH:
+        {
+            rc = sqlite3_prepare_v2(db, DML_SELECT_COMPOUND_1_LIKE, -1, &stmt, 0);
+            break;
+        }
+        case CONTAINS:
+        {
+            rc = sqlite3_prepare_v2(db, DML_SELECT_COMPOUND_1_LIKE, -1, &stmt, 0);
+            break;
+        }
+    }
     if (rc != SQLITE_OK) 
     {
         cerr << "Err: " << rc << " Failed to prepare query statement for words to paragraphs: " << sqlite3_errmsg(db) << endl;
@@ -925,18 +706,45 @@ vector<pair<int64_t, vector<int64_t>>> Database::QueryWordsToParagraphsTableRetu
         return results;
     }
 
-    rc = sqlite3_bind_int(stmt, 1, word_id);
+    switch (Type)
+    {
+        case EXACT_MATCH:
+        {
+            rc = sqlite3_bind_text(stmt, 1, normalized_word.c_str(), -1, SQLITE_STATIC);
+            break;
+        }
+        case BEGINS_WITH:
+        {
+            rc = sqlite3_bind_text(stmt, 1, (normalized_word + "%").c_str(), -1, SQLITE_STATIC);
+            break;
+        }
+        case ENDS_WITH:
+        {
+            rc = sqlite3_bind_text(stmt, 1, ("%" + normalized_word).c_str(), -1, SQLITE_STATIC);
+            break;
+        }
+        case CONTAINS:
+        {
+            rc = sqlite3_bind_text(stmt, 1, ("%" + normalized_word + "%").c_str(), -1, SQLITE_STATIC);
+            break;
+        }
+    }
     if (rc != SQLITE_OK) 
     {
-        cerr << "Err: " << rc << " Failed to bind integer to the query statement for words to paragraphs: " << sqlite3_errmsg(db) << endl;
+        cerr << "Err: " << rc << " Failed to bind text to the query statement for words to paragraphs: " << sqlite3_errmsg(db) << endl;
         sqlite3_finalize(stmt);
         return results;
     }
 
-    int64_t paragraph_id = -1;
-    vector<int64_t> word_ids = {};
+#ifdef DATABASE_LOG_PREPARED_STATEMENTS
+    const char* prepared_statement = sqlite3_expanded_sql(stmt);
+    cout << prepared_statement << endl;
+#endif
 
-    size_t rows_returned = 0;
+    int64_t paragraph_id = -1;
+    string paragraph_text = "";
+    int64_t word_id = 0;
+    vector<int64_t> word_ids = {};
 
     do
     {
@@ -945,11 +753,15 @@ vector<pair<int64_t, vector<int64_t>>> Database::QueryWordsToParagraphsTableRetu
         if (rc == SQLITE_ROW) 
         {
             int64_t p_id = sqlite3_column_int64(stmt, 0); 
-            int64_t w_id = sqlite3_column_int64(stmt, 1);
+            const char* p_text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+            int64_t _w_id = sqlite3_column_int64(stmt, 2);
+            int64_t w_id = sqlite3_column_int64(stmt, 3);
 
             if (paragraph_id == -1) 
             {
                 paragraph_id = p_id;
+                paragraph_text = p_text;
+                word_id = _w_id;
                 word_ids.push_back(w_id);
             } else
             {
@@ -958,26 +770,27 @@ vector<pair<int64_t, vector<int64_t>>> Database::QueryWordsToParagraphsTableRetu
                     word_ids.push_back(w_id);
                 } else
                 {
-                    results.push_back(pair(paragraph_id, word_ids));
+                    results.push_back(tuple(paragraph_id, paragraph_text, word_id, word_ids));
                     paragraph_id = p_id;
+                    paragraph_text = p_text;
+                    word_id = _w_id;
                     word_ids = {w_id};
                 }
             }
 
-            rows_returned += 1;
         } else if (rc == SQLITE_DONE) 
         {
 
-            if (paragraph_id != -1 && word_ids.empty())
+            if (paragraph_id != -1 && !word_ids.empty())
             {
                 if (results.empty())
                 {
-                    results.push_back(pair(paragraph_id, word_ids));
+                    results.push_back(tuple(paragraph_id, paragraph_text, word_id, word_ids));
                 } else
                 {
-                    if (results.back().first != paragraph_id)
+                    if (get<0>(results.back()) != paragraph_id)
                     {
-                        results.push_back(pair(paragraph_id, word_ids));
+                        results.push_back(tuple(paragraph_id, paragraph_text, word_id, word_ids));
                     }
                 }
                 
@@ -1009,112 +822,6 @@ vector<pair<int64_t, vector<int64_t>>> Database::QueryWordsToParagraphsTableRetu
 #endif
     sqlite3_finalize(stmt);
 
-    return results;
-}
-
-vector<pair<int64_t, vector<int64_t>>> Database::QueryWordsToParagraphsTableReturnUniqueParagraphIdsAndAllWordIdsForTheParagraphInOrder(const vector<int64_t> word_ids)
-{
-    vector<pair<int64_t, vector<int64_t>>> results = {};
-
-    if (!word_ids.empty())
-    {
-#ifdef DATABASE_LOG_EXECUTION_TIMES
-        chrono::_V2::system_clock::time_point t0  = chrono::_V2::system_clock::time_point();
-        chrono::_V2::system_clock::time_point t1  = chrono::_V2::system_clock::time_point();
-
-        t0  = chrono::high_resolution_clock::now();
-#endif
-        sqlite3_stmt* stmt = nullptr;
-
-        string statement_text = string(DML_SELECT_COMPOUND_QUERY_1_PART_1);
-        for (size_t i = 0; i < word_ids.size(); ++i) {
-            statement_text += to_string(word_ids[i]);
-            if (i != word_ids.size() - 1) {
-                statement_text += ", ";
-            }
-        }
-        statement_text += DML_SELECT_COMPOUND_QUERY_1_PART_2;
-
-        rc = sqlite3_prepare_v2(db, statement_text.c_str(), -1, &stmt, 0);
-        if (rc != SQLITE_OK) 
-        {
-            cerr << "Err: " << rc << " Failed to prepare query statement for words to paragraphs: " << sqlite3_errmsg(db) << endl;
-            sqlite3_finalize(stmt);
-            return results;
-        }
-
-        int64_t paragraph_id = -1;
-        vector<int64_t> word_ids = {};
-
-        do
-        {
-            rc = sqlite3_step(stmt);
-
-            if (rc == SQLITE_ROW) 
-            {
-                int64_t p_id = sqlite3_column_int64(stmt, 0); 
-                int64_t w_id = sqlite3_column_int64(stmt, 1);
-
-                if (paragraph_id == -1) 
-                {
-                    paragraph_id = p_id;
-                    word_ids.push_back(w_id);
-                } else
-                {
-                    if (paragraph_id == p_id)
-                    {
-                        word_ids.push_back(w_id);
-                    } else
-                    {
-                        results.push_back(pair(paragraph_id, word_ids));
-                        paragraph_id = p_id;
-                        word_ids = {w_id};
-                    }
-                }
-            } else if (rc == SQLITE_DONE) 
-            {
-
-                if (paragraph_id != -1 && word_ids.empty())
-                {
-                    if (results.empty())
-                    {
-                        results.push_back(pair(paragraph_id, word_ids));
-                    } else
-                    {
-                        if (results.back().first != paragraph_id)
-                        {
-                            results.push_back(pair(paragraph_id, word_ids));
-                        }
-                    }
-                    
-                }
-            } else
-            {
-                cerr << "Err: " << rc << " Error while querying words to paragraphs: " << sqlite3_errmsg(db) << endl;
-            }
-
-        } while (rc == SQLITE_ROW);
-
-        if (rc != SQLITE_DONE) 
-        {
-            cerr << "Err: " << rc << " Error while querying words to paragraphs: " << sqlite3_errmsg(db) << endl;
-        }
-
-#ifdef DATABASE_LOG_EXECUTION_TIMES
-        t1  = chrono::high_resolution_clock::now();
-        auto duration = chrono::duration_cast<chrono::microseconds>(t1 - t0);
-        cout << "Time taken to query words to paragraphs table: " << duration.count() << " microseconds" << endl;
-#endif
-#ifdef DATABASE_EXPLAIN_QUERY_PLANS
-        ExplainWordsTableQueryPlan(normalized_word, Type);
-        const int scanStepsCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_FULLSCAN_STEP, 0);
-        const int sortCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_SORT, 0);
-        const int autoIdxCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_AUTOINDEX, 0);
-
-        cout << "Scan Steps: " << scanStepsCt << " Sort Count: " << sortCt << " Auto Index Count: " << autoIdxCt << endl;
-#endif
-        sqlite3_finalize(stmt);
-    }
     return results;
 }
 
@@ -1181,3 +888,4 @@ bool Database::EndTransaction(const string TransactionName, const bool FailureUp
         return true;
     }
 }
+

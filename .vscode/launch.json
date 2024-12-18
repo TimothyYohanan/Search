@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "clang++ - Build and debug project",
+            "name": "gdb - Build and debug project",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/bin/Search",

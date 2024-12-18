@@ -1,7 +1,8 @@
 #pragma once
 
-#define SEARCH_LOG_EXECUTION_TIMES    // uncomment this line to log execution times to the console
-#define SEARCH_LOG_DEBUG_MESSAGES     // uncomment this line to log debug messages to the console
+#define SEARCH_LOG_EXECUTION_TIMES                  // uncomment this line to log execution times to the console
+#define SEARCH_LOG_DEBUG_MESSAGES                   // uncomment this line to log debug messages to the console
+// #define SEARCH_CHECK_FOR_ASSUMED_IMPOSSIBLE_ERRORS  // checks for errors that should, theoretically, never happen
 
 #include <vector>
 
@@ -29,11 +30,11 @@ public:
 
     static inline const WordMatch getMatches(Database* db_prechecked, const string& normalized_word);
 
-    static unordered_map<int64_t, pair<int, int>> calculateParagraphScores(const vector<WordMatch>& matches);
+    static inline unordered_map<int64_t, pair<pair<int, int>, string>> calculateParagraphScores(const vector<WordMatch>& matches);
 
-    static bool rankParagraphs(const pair<int64_t, pair<int, int>>& a, const pair<int64_t, pair<int, int>>& b);
+    static inline bool rankParagraphs(const pair<int64_t, pair<pair<int, int>, string>>& a, const pair<int64_t, pair<pair<int, int>, string>>& b);
 
-    static vector<int64_t> rankParagraphIds(const vector<WordMatch>& matches);
+    static inline vector<pair<int64_t, string>> rankParagraphIds(const vector<WordMatch>& matches);
 
     static int searchBarInputCallback(ImGuiInputTextCallbackData* data);
 

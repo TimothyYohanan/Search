@@ -21,10 +21,6 @@ struct NormalizedText
 
     string normalized_text;
 
-    /*
-    * To Do:
-    * Remove duplicates from this list, and tokenize normalized text into references to this list to handle duplicate words in order.
-    */
     vector<string> normalized_words;
 
     inline void F1();

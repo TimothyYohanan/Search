@@ -6,8 +6,6 @@ CREATE TABLE IF NOT EXISTS Paragraphs (
     original_text TEXT NOT NULL,
     normalized_text TEXT NOT NULL
 );
-
-CREATE INDEX IF NOT EXISTS idx_normalized_text ON Paragraphs(normalized_text);
 )";
 
 const char* DMC_ANALYZE_PARAGRAPHS = R"(
@@ -17,11 +15,3 @@ const char* DMC_ANALYZE_PARAGRAPHS = R"(
 const char* DML_INSERT_PARAGRAPH = R"(
     INSERT INTO Paragraphs (original_text, normalized_text) VALUES (?, ?);
 )";
-
-const char* DML_SELECT_ORIGINAL_TEXT_FROM_PARAGRAPHS_WHERE_ID_EQUALS = R"(
-    SELECT original_text FROM Paragraphs WHERE id = ?;
-)";
-
-const char* DML_SELECT_ORIGINAL_TEXT_FROM_PARAGRAPHS_WHERE_ID_IN_PART_1 = "SELECT original_text FROM Paragraphs WHERE id IN (";
-
-const char* DML_SELECT_ORIGINAL_TEXT_FROM_PARAGRAPHS_WHERE_ID_IN_PART_2 = ");";

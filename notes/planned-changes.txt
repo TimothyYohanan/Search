@@ -1,7 +1,14 @@
-the final two queries in the search take up the bulk of the query time, and they are slowest when the input is 1 or 2 characters.
-combining the final two queries with a JOIN statement should improve the overall query speed.
+To optimize further, turn the two queries for 'exact matches' and 'partial matches' into one query.
+	The final search itteration when you finally have an exact match, as well as partial matches, takes too long.
+	Also, querying the first two letters of a word tend to take about the same ammount of time.
+	3 letters to (word length - 1) is pretty much in the green zone.
 
-To acheive target execution speeds, I may need to pool 2-3 connections to the database.
+	I want to get this query done in 1/10th of a frame on mobile, and I assume mobile devices will opperate at ~1/3rd the speed of my workstation.
+	I'm starting to think that this may not be possible using only sqlite, but if I can get the maximum query time to ~1000 microseconds, well, I'll just have to make that work for now.
+		On the bright side, queries for 3 or more letters at a time tend to be ~650 microseconds on my workstation.
+		If I can bring that down to ~500 microseconds... 500 * 3 = 1,500
+		1,500 / 11,111 = 13.5% of a frame at 90 fps. 
+		The rest of the search loop aside from the query itself takes about ~200 microseconds, so I may be able to shave some time off from there.
 
 the sorting method used to rank search results is a placeholder for application-specific methods.
 the placeholder functions are:
