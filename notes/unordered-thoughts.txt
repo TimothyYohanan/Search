@@ -1,0 +1,11 @@
+I have chosen word_id as the first element in the compound primary key index on WordsToParagraphs. That isn't a trivial choice, and it may need to change.
+
+Keeping the Words table and WordsToParagraphs table in memory is an option, but commiting to doing that at runtime requires also performing backups of the in-memory databases, and everything that their changes cascade to. I prefer less complexity, where possible.
+	* to make things faster *
+
+The performance of SELECT DISTINCT on WordsToParagraphs is pretty good.
+Note that all three tables have corresponding indexes applied to them.
+With the addition of extra indexes, and perhaps tables, sorting by keywords and other metrics could be part of the SQL statement(s).
+There is the option to extend sqlite, however, the usefulness of doing that (to me) can only be evaluated once I've completed this project.
+The ability to meet 1/10th of a frame for a short reverse lookup is a good benchmark. (In practice, these things are done async, as the user scrolls the page.) 
+I hope that this is possible for ~2,000 'paragraph' entries without moving the critical tables into memory.
