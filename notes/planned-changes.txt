@@ -14,8 +14,6 @@ The longer of the two queries tends to take 446.66 microseconds, so with the ove
 Combined with the processing time afterwards, we're probably looking at another 100 microsecond improvement.
 It isn't quite 1/10th of a frame, but it's good enough.
 
-Oh, theres a bug to fix also. When a non-matching word is typed in, there is a segmentation fault.
-
 the sorting method used to rank search results is a placeholder for application-specific methods.
 the placeholder functions are:
     Search::calculateParagraphScores()

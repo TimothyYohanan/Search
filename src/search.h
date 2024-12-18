@@ -5,6 +5,7 @@
 // #define SEARCH_CHECK_FOR_ASSUMED_IMPOSSIBLE_ERRORS  // checks for errors that should, theoretically, never happen
 
 #include <vector>
+#include <optional>
 
 #include "database.h"
 

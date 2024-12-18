@@ -63,11 +63,10 @@ inline const WordMatch Search::getMatches(Database* db_prechecked, const string&
                 partial_match_idxs.push_back(get<2>(data));
                 partial_match_data.push_back(tuple(get<0>(data), get<1>(data), get<3>(data)));
             }
-
             return WordMatch(normalized_word, partial_match_idxs, partial_match_data);
         } else
         {
-            cout << "searchBarInputCallback() - WARNING: did not find any exact matches, and did not find any partial matches." << endl;
+            return WordMatch(normalized_word, {}, {});
         }
     } else
     {
@@ -109,7 +108,6 @@ inline const WordMatch Search::getMatches(Database* db_prechecked, const string&
             partial_match_idxs.push_back(get<2>(data));
             partial_match_data.push_back(tuple(get<0>(data), get<1>(data), get<3>(data)));
         }
-
         return WordMatch(normalized_word, exact_match_idx, exact_match_data, partial_match_idxs, partial_match_data);
     }
 }
@@ -211,7 +209,11 @@ int Search::searchBarInputCallback(ImGuiInputTextCallbackData* data) {
                 for (size_t i = 0; i < nWords; ++i)
                 {
                     const string& normalized_word = normalized_text.normalized_words[i];
-                    SearchProgress.push_back(getMatches(db, normalized_word));
+                    optional<WordMatch> match = getMatches(db, normalized_word);
+                    if(match)
+                    {
+                        SearchProgress.push_back(static_cast<WordMatch>(match.value()));
+                    }
                 }
             } else
             {
@@ -232,11 +234,13 @@ int Search::searchBarInputCallback(ImGuiInputTextCallbackData* data) {
                     {
                         if (normalized_word != SearchProgress[i].normalized_word)
                         {
-                            SearchProgress[i] = getMatches(db, normalized_word);
+                            const WordMatch match = getMatches(db, normalized_word);
+                            SearchProgress[i] = match;
                         }
                     } else
                     {
-                        SearchProgress.push_back(getMatches(db, normalized_word));
+                        const WordMatch match = getMatches(db, normalized_word);
+                        SearchProgress.push_back(match);
                     }
                 }
 
