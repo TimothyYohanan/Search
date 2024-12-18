@@ -706,26 +706,33 @@ vector<tuple<int64_t, string, int64_t, vector<int64_t>>> Database::GetAll_Paragr
         return results;
     }
 
+    rc = sqlite3_bind_text(stmt, 1, normalized_word.c_str(), -1, SQLITE_STATIC);
+    if (rc != SQLITE_OK) 
+    {
+        cerr << "Err: " << rc << " Failed to bind text to the query statement for words to paragraphs: " << sqlite3_errmsg(db) << endl;
+        sqlite3_finalize(stmt);
+        return results;
+    }
+
     switch (Type)
     {
         case EXACT_MATCH:
         {
-            rc = sqlite3_bind_text(stmt, 1, normalized_word.c_str(), -1, SQLITE_STATIC);
             break;
         }
         case BEGINS_WITH:
         {
-            rc = sqlite3_bind_text(stmt, 1, (normalized_word + "%").c_str(), -1, SQLITE_STATIC);
+            rc = sqlite3_bind_text(stmt, 2, (normalized_word + "%").c_str(), -1, SQLITE_STATIC);
             break;
         }
         case ENDS_WITH:
         {
-            rc = sqlite3_bind_text(stmt, 1, ("%" + normalized_word).c_str(), -1, SQLITE_STATIC);
+            rc = sqlite3_bind_text(stmt, 2, ("%" + normalized_word).c_str(), -1, SQLITE_STATIC);
             break;
         }
         case CONTAINS:
         {
-            rc = sqlite3_bind_text(stmt, 1, ("%" + normalized_word + "%").c_str(), -1, SQLITE_STATIC);
+            rc = sqlite3_bind_text(stmt, 2, ("%" + normalized_word + "%").c_str(), -1, SQLITE_STATIC);
             break;
         }
     }

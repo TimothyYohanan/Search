@@ -106,12 +106,8 @@ inline const WordMatch Search::getMatches(Database* db_prechecked, const string&
 
         for (const tuple<int64_t, string, int64_t, vector<int64_t>>& data : partial_matches)
         {
-            const int64_t partial_match_idx = get<2>(data);
-            if (partial_match_idx != exact_match_idx)
-            {
-                partial_match_idxs.push_back(partial_match_idx);
-                partial_match_data.push_back(tuple(get<0>(data), get<1>(data), get<3>(data)));
-            }
+            partial_match_idxs.push_back(get<2>(data));
+            partial_match_data.push_back(tuple(get<0>(data), get<1>(data), get<3>(data)));
         }
 
         return WordMatch(normalized_word, exact_match_idx, exact_match_data, partial_match_idxs, partial_match_data);

@@ -1,14 +1,20 @@
-To optimize further, turn the two queries for 'exact matches' and 'partial matches' into one query.
-	The final search itteration when you finally have an exact match, as well as partial matches, takes too long.
-	Also, querying the first two letters of a word tend to take about the same ammount of time.
-	3 letters to (word length - 1) is pretty much in the green zone.
+Here's the breakdown of query speed for the paragraph 'silver ridge'.
+I'm measuring the time it takes to run the query when the final 'e' of the paragraph is typed.
 
-	I want to get this query done in 1/10th of a frame on mobile, and I assume mobile devices will opperate at ~1/3rd the speed of my workstation.
-	I'm starting to think that this may not be possible using only sqlite, but if I can get the maximum query time to ~1000 microseconds, well, I'll just have to make that work for now.
-		On the bright side, queries for 3 or more letters at a time tend to be ~650 microseconds on my workstation.
-		If I can bring that down to ~500 microseconds... 500 * 3 = 1,500
-		1,500 / 11,111 = 13.5% of a frame at 90 fps. 
-		The rest of the search loop aside from the query itself takes about ~200 microseconds, so I may be able to shave some time off from there.
+Yesterday's commit had the following characteristics:
+Time taken to search the database: 1755.99 microseconds
+Time taken to process results: 138.67
+
+This commit has the following characteristics:
+Time taken to search the database: 711.32 microseconds
+Time taken to process results: 122.68
+
+Combining the two queries into one would probably speed things up a bit, but I'm going to try doing it multithreaded first.
+The longer of the two queries tends to take 446.66 microseconds, so with the overhead of multithreading, lets estimate the entire query will take 466.66 microseconds.
+Combined with the processing time afterwards, we're probably looking at another 100 microsecond improvement.
+It isn't quite 1/10th of a frame, but it's good enough.
+
+Oh, theres a bug to fix also. When a non-matching word is typed in, there is a segmentation fault.
 
 the sorting method used to rank search results is a placeholder for application-specific methods.
 the placeholder functions are:

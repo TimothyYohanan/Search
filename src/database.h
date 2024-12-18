@@ -1,7 +1,7 @@
 #pragma once
 
 // #define DATABASE_EXPLAIN_QUERY_PLANS    // uncomment this line to log explainations of query plans to the console
-// #define DATABASE_LOG_EXECUTION_TIMES    // uncomment this line to log execution times to the console
+#define DATABASE_LOG_EXECUTION_TIMES    // uncomment this line to log execution times to the console
 // #define DATABASE_LOG_PREPARED_STATEMENTS    // uncomment this line to log prepared statements to the console before they are executed
 #define MAX_WORD_SIZE (static_cast<size_t>(45))
 #define MAX_PARAGRAPH_SIZE (static_cast<size_t>(200))
