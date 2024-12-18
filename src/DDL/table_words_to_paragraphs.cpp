@@ -59,6 +59,10 @@ const char* DML_SELECT_COMPOUND_1_LIKE = R"(
             ON subquery.paragraph_id = paragraphs.id
         WHERE subquery.paragraph_id IN (
             SELECT paragraph_id                         -- we don't use SELECT DISTINCT because we might have more than one word matches in a paragraph.
+                                                        -- NOTE: Hmm. On second thought, SELECT DISTINCT may be a good idea.
+                                                        -- CONT: Want to test one more version of this before consolidating these two statements into one.
+                                                        -- CONT: (SELECT id FROM Words WHERE word LIKE ?) AS matched_word_id, and SELECT paragraph_id FROM WordsToParagraphs WHERE word_id IN matched_word_id
+                                                        -- CONT: So I'd be returning all of the matches in every result. It might be faster, even though more data is being returned. Worth a try.
             FROM WordsToParagraphs
             WHERE word_id = selected_words.id           -- using the equals clause (instead of IN) returns only the row that matches the selected_words. so not all of the rows we need are returned.
         )
