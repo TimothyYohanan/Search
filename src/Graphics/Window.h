@@ -19,7 +19,7 @@ using namespace std;
 class GLFW_Window {
 public:
     GLFW_Window(string name, uint16_t width, uint16_t height, vector<pair<uint32_t, unsigned int>> window_hints);
-    ~GLFW_Window ();
+    virtual ~GLFW_Window ();
 
     GLFWwindow *window;
 

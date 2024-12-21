@@ -1,3 +1,18 @@
-src/Graphics/VulkanDevice is unfinished. There are several annotated elements that are not properly cleaned up in the destructor.
+(Potential) Issue:
+    $ valgrind --leak-check=full --track-origins=yes --suppressions=/usr/libexec/valgrind/default.supp --show-leak-kinds=all ./Search 2>> valgrind_output.txt
 
-ImGui_Binding::RenderFrame() uses an unchecked pointer, which is potentially dangerous.
+    --- Highlighted output ---
+
+    ==40954== 288 bytes in 1 blocks are possibly lost in loss record 2,078 of 2,134
+    ==40954==    at 0x484C214: calloc (vg_replace_malloc.c:1675)
+    ==40954==    by 0x4011AF2: UnknownInlinedFun (rtld-malloc.h:44)
+    ==40954==    by 0x4011AF2: allocate_dtv (dl-tls.c:401)
+    ==40954==    by 0x40125B1: _dl_allocate_tls (dl-tls.c:679)
+    ==40954==    by 0x4CF39E4: pthread_create@@GLIBC_2.34 (in /usr/lib64/libc.so.6)
+    ==40954==    by 0x4150BD: ThreadPool::ThreadPool(unsigned long, int) (linux_threadpool.cpp:69)
+    ==40954==    by 0x421151: Search::Search() (search.cpp:24)
+    ==40954==    by 0x4211A7: Search::Get() (search.cpp:31)
+    ==40954==    by 0x409C8A: main (main.cpp:131)
+
+    It isn't the ThreadPool::Do() method itself. I've commented it out.
+    It isn't the call to ThreadPool::Do() in Search::getMatches(). I've commented it out.

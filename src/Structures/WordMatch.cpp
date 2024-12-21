@@ -24,19 +24,19 @@ WordMatch::WordMatch(
 
 WordMatch::WordMatch(
     WordMatch&& other) noexcept : 
-        normalized_word(move(other.normalized_word)), 
-        exact_match_idx(move(other.exact_match_idx)), 
-        exact_match_data(move(other.exact_match_data)), 
-        partial_match_idxs(move(other.partial_match_idxs)),
-        partial_match_data(move(other.partial_match_data)) {}
+        normalized_word(std::move(other.normalized_word)), 
+        exact_match_idx(std::move(other.exact_match_idx)), 
+        exact_match_data(std::move(other.exact_match_data)), 
+        partial_match_idxs(std::move(other.partial_match_idxs)),
+        partial_match_data(std::move(other.partial_match_data)) {}
 
 WordMatch::WordMatch(
     const WordMatch& other) noexcept : 
-    normalized_word(move(other.normalized_word)), 
-    exact_match_idx(move(other.exact_match_idx)), 
-    exact_match_data(move(other.exact_match_data)), 
-    partial_match_idxs(move(other.partial_match_idxs)),
-    partial_match_data(move(other.partial_match_data)) {}
+    normalized_word(std::move(other.normalized_word)), 
+    exact_match_idx(std::move(other.exact_match_idx)), 
+    exact_match_data(std::move(other.exact_match_data)), 
+    partial_match_idxs(std::move(other.partial_match_idxs)),
+    partial_match_data(std::move(other.partial_match_data)) {}
 
 WordMatch& WordMatch::operator=(const WordMatch& other) noexcept 
 { 

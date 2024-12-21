@@ -72,7 +72,13 @@
 			"ratio": "cpp",
 			"iomanip": "cpp",
 			"valarray": "cpp",
-			"filesystem": "cpp"
+			"filesystem": "cpp",
+			"thread": "cpp",
+			"future": "cpp",
+			"condition_variable": "cpp",
+			"mutex": "cpp",
+			"semaphore": "cpp",
+			"stop_token": "cpp"
 		}
 	}
 }

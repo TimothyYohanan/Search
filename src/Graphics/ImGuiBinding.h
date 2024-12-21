@@ -12,7 +12,7 @@ using namespace std;
 class ImGui_Binding {
 public:
     ImGui_Binding(shared_ptr<GLFW_Window> window, shared_ptr<VulkanDevice> device, vector<string> ttf_font_file_paths = vector<string>(), float font_size = 16.0f);
-    ~ImGui_Binding();
+    virtual ~ImGui_Binding();
 
     virtual void RenderFrame(ImDrawData* draw_data) const;
     virtual void PresentFrame() const;

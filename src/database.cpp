@@ -14,15 +14,17 @@
 #include "DDL/table_paragraphs.h"
 #include "DDL/table_words_to_paragraphs.h"
 
-Database* Database::Instance = nullptr;
-sqlite3* Database::db = nullptr;
-int Database::rc = 0;
 char* Database::errMsg = nullptr;
+Database* Database::Instance = nullptr;
+sqlite3* Database::db_mainThread = nullptr;
+sqlite3* Database::db_backgroundThread = nullptr;
 bool Database::bIsValid = true;
 
 
 Database::Database()
 {
+    int rc = 0;
+
     /*
     * Database will be opened if it already exists, or created.
     * Databased is used in NOMUTEX mode, which means seperate threads can access 
@@ -30,10 +32,18 @@ Database::Database()
     * 
     * Note: NOMUTEX is not ideal for all use cases.
     */
-    rc = sqlite3_open_v2(databaseFilepath, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nullptr);
+    rc = sqlite3_open_v2(databaseFilepath, &db_mainThread, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nullptr);
     if (rc) 
     {
-        cerr << "Err: " << rc << " Can't open database: " << sqlite3_errmsg(db) << endl;
+        cerr << "Err: " << rc << " Can't open database: " << sqlite3_errmsg(db_mainThread) << endl;
+        bIsValid = false;
+        return;
+    }
+
+    rc = sqlite3_open_v2(databaseFilepath, &db_backgroundThread, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nullptr);
+    if (rc) 
+    {
+        cerr << "Err: " << rc << " Can't open database: " << sqlite3_errmsg(db_backgroundThread) << endl;
         bIsValid = false;
         return;
     }
@@ -41,7 +51,7 @@ Database::Database()
     /*
     * Execute DDL Statements
     */
-    rc = sqlite3_exec(db, DDL_CREATE_TABLE_IF_NOT_EXISTS_WORDS, 0, 0, &errMsg);
+    rc = sqlite3_exec(db_mainThread, DDL_CREATE_TABLE_IF_NOT_EXISTS_WORDS, 0, 0, &errMsg);
     if (rc != SQLITE_OK) 
     {
         cerr << "Err: " << rc << " SQL error: " << errMsg << endl;
@@ -50,7 +60,7 @@ Database::Database()
         return;
     }
 
-    rc = sqlite3_exec(db, DDL_CREATE_TABLE_IF_NOT_EXISTS_PARAGRAPHS, 0, 0, &errMsg);
+    rc = sqlite3_exec(db_mainThread, DDL_CREATE_TABLE_IF_NOT_EXISTS_PARAGRAPHS, 0, 0, &errMsg);
     if (rc != SQLITE_OK) 
     {
         cerr << "Err: " << rc << " SQL error: " << errMsg << endl;
@@ -59,7 +69,7 @@ Database::Database()
         return;
     }
 
-    rc = sqlite3_exec(db, DDL_CREATE_TABLE_IF_NOT_EXISTS_WORDS_TO_PARAGRAPHS, 0, 0, &errMsg);
+    rc = sqlite3_exec(db_mainThread, DDL_CREATE_TABLE_IF_NOT_EXISTS_WORDS_TO_PARAGRAPHS, 0, 0, &errMsg);
     if (rc != SQLITE_OK) 
     {
         cerr << "Err: " << rc << " SQL error: " << errMsg << endl;
@@ -108,9 +118,9 @@ Database::Database()
     auto CommitTransaction = [&]() -> bool
     {
         sqlite3_finalize(stmt_insert_paragraph);
-        sqlite3_finalize(stmt_insert_paragraph);
-        sqlite3_finalize(stmt_insert_paragraph);
-        sqlite3_finalize(stmt_insert_paragraph);
+        sqlite3_finalize(stmt_insert_word);
+        sqlite3_finalize(stmt_select_word);
+        sqlite3_finalize(stmt_insert_words_to_paragraphs);
         EndTransaction(LoadTestDataTransactionName, true);
         return true;
     };
@@ -120,31 +130,31 @@ Database::Database()
         return;
     }
 
-    rc = sqlite3_prepare_v3(db, DML_INSERT_PARAGRAPH, -1, SQLITE_PREPARE_PERSISTENT, &stmt_insert_paragraph, 0);
+    rc = sqlite3_prepare_v3(db_mainThread, DML_INSERT_PARAGRAPH, -1, SQLITE_PREPARE_PERSISTENT, &stmt_insert_paragraph, 0);
     if (rc != SQLITE_OK) 
     {
-        FailTransaction(LoadTestDataTransactionName, "Failed to prepare insert statement for paragraphs", true, CommitTransaction);
+        FailTransaction(LoadTestDataTransactionName, rc, "Failed to prepare insert statement for paragraphs", true, CommitTransaction);
         return;
     }
 
-    rc = sqlite3_prepare_v3(db, DML_INSERT_WORD, -1, SQLITE_PREPARE_PERSISTENT, &stmt_insert_word, 0);
+    rc = sqlite3_prepare_v3(db_mainThread, DML_INSERT_WORD, -1, SQLITE_PREPARE_PERSISTENT, &stmt_insert_word, 0);
     if (rc != SQLITE_OK) 
     {
-        FailTransaction(LoadTestDataTransactionName, "Failed to prepare insert statement for words", true, CommitTransaction);
+        FailTransaction(LoadTestDataTransactionName, rc, "Failed to prepare insert statement for words", true, CommitTransaction);
         return;
     }
 
-    rc = sqlite3_prepare_v3(db, DML_SELECT_ID_FROM_WORDS_WHERE_WORD_EQUALS, -1, SQLITE_PREPARE_PERSISTENT, &stmt_select_word, 0);
+    rc = sqlite3_prepare_v3(db_mainThread, DML_SELECT_ID_FROM_WORDS_WHERE_WORD_EQUALS, -1, SQLITE_PREPARE_PERSISTENT, &stmt_select_word, 0);
     if (rc != SQLITE_OK) 
     {
-        FailTransaction(LoadTestDataTransactionName, "Failed to prepare select statement for words", true, CommitTransaction);
+        FailTransaction(LoadTestDataTransactionName, rc, "Failed to prepare select statement for words", true, CommitTransaction);
         return;
     }
 
-    rc = sqlite3_prepare_v3(db, DML_INSERT_WORD_TO_PARAGRAPH, -1, SQLITE_PREPARE_PERSISTENT, &stmt_insert_words_to_paragraphs, 0);
+    rc = sqlite3_prepare_v3(db_mainThread, DML_INSERT_WORD_TO_PARAGRAPH, -1, SQLITE_PREPARE_PERSISTENT, &stmt_insert_words_to_paragraphs, 0);
     if (rc != SQLITE_OK) 
     {
-        FailTransaction(LoadTestDataTransactionName, "Failed to prepare select statement for words to paragraphs", true, CommitTransaction);
+        FailTransaction(LoadTestDataTransactionName, rc, "Failed to prepare select statement for words to paragraphs", true, CommitTransaction);
         return;
     }
 
@@ -161,24 +171,24 @@ Database::Database()
         rc = sqlite3_bind_text(stmt_insert_paragraph, 1, normalized_text.original_text.c_str(), -1, SQLITE_STATIC);
         if (rc != SQLITE_OK) 
         {
-            FailTransaction(LoadTestDataTransactionName, "Failed to bind text to prepared statement for paragraphs", true, CommitTransaction);
+            FailTransaction(LoadTestDataTransactionName, rc, "Failed to bind text to prepared statement for paragraphs", true, CommitTransaction);
             return;
         }
 
         sqlite3_bind_text(stmt_insert_paragraph, 2, normalized_text.normalized_text.c_str(), -1, SQLITE_STATIC);
         if (rc != SQLITE_OK) 
         {
-            FailTransaction(LoadTestDataTransactionName, "Failed to bind text to prepared statement for paragraphs", true, CommitTransaction);
+            FailTransaction(LoadTestDataTransactionName, rc, "Failed to bind text to prepared statement for paragraphs", true, CommitTransaction);
             return;
         }
 
         rc = sqlite3_step(stmt_insert_paragraph);
         if (rc != SQLITE_DONE) 
         {
-            FailTransaction(LoadTestDataTransactionName, "Failed to insert paragraph", false, nullptr);
+            cerr << "Err: " << rc << " Unexpected event during transaction '" << LoadTestDataTransactionName << "': Failed to insert paragraph" << " - " << sqlite3_errmsg(db_mainThread) << endl;
         } else
         {
-            paragraph_id = static_cast<int>(sqlite3_last_insert_rowid(db));
+            paragraph_id = static_cast<int>(sqlite3_last_insert_rowid(db_mainThread));
 
             for (size_t i = 0; i < normalized_text.normalized_words.size(); ++i)
             {
@@ -191,7 +201,7 @@ Database::Database()
                 rc = sqlite3_bind_text(stmt_insert_word, 1, word.c_str(), -1, SQLITE_STATIC);
                 if (rc != SQLITE_OK) 
                 {
-                    FailTransaction(LoadTestDataTransactionName, "Failed to bind text to prepared statement for words", true, CommitTransaction);
+                    FailTransaction(LoadTestDataTransactionName, rc, "Failed to bind text to prepared statement for words", true, CommitTransaction);
                     return;
                 }
 
@@ -204,7 +214,7 @@ Database::Database()
                     rc = sqlite3_bind_text(stmt_select_word, 1, word.c_str(), -1, SQLITE_STATIC);
                     if (rc != SQLITE_OK) 
                     {
-                        FailTransaction(LoadTestDataTransactionName, "Failed to bind text to prepared statement for words", true, CommitTransaction);
+                        FailTransaction(LoadTestDataTransactionName, rc, "Failed to bind text to prepared statement for words", true, CommitTransaction);
                         return;
                     }
 
@@ -214,30 +224,30 @@ Database::Database()
                         word_id = sqlite3_column_int64(stmt_select_word, 0);
                     } else if (rc == SQLITE_DONE)
                     {
-                        cerr << "Error: No existing word found, but the insert failed due to a constraint." << endl;
+                        cerr << "Err: " << rc << " Unexpected event during transaction '" << LoadTestDataTransactionName << "': Failed to instert word AND failed select word. This should be impossible." << " - " << sqlite3_errmsg(db_mainThread) << endl;
                     } else 
                     {
-                        FailTransaction(LoadTestDataTransactionName, "Failed to select word", false, nullptr);
+                        cerr << "Err: " << rc << " Unexpected event during transaction '" << LoadTestDataTransactionName << "': Failed to select word" << " - " << sqlite3_errmsg(db_mainThread) << endl;
                     }
 
                     rc = sqlite3_reset(stmt_select_word);
                     if (rc != SQLITE_OK) 
                     {
-                        FailTransaction(LoadTestDataTransactionName, "Failed to reset prepared statement for words", true, CommitTransaction);
+                        FailTransaction(LoadTestDataTransactionName, rc, "Failed to reset prepared statement for words", true, CommitTransaction);
                         return;
                     }
                 } else if (rc == SQLITE_DONE || rc == SQLITE_OK) 
                 {
-                    word_id = static_cast<int>(sqlite3_last_insert_rowid(db));
+                    word_id = static_cast<int>(sqlite3_last_insert_rowid(db_mainThread));
                 } else 
                 {
-                    cerr << "Err: " << rc << " Failed to insert word: " << sqlite3_errmsg(db) << endl;
+                    cerr << "Err: " << rc << " Unexpected event during transaction '" << LoadTestDataTransactionName << "': Failed to insert word" << " - " << sqlite3_errmsg(db_mainThread) << endl;
                 }
 
                 rc = sqlite3_reset(stmt_insert_word);
                 if (rc != SQLITE_OK && rc != SQLITE_CONSTRAINT) 
                 {
-                    FailTransaction(LoadTestDataTransactionName, "Failed to reset prepared statement for words", true, CommitTransaction);
+                    FailTransaction(LoadTestDataTransactionName, rc, "Failed to reset prepared statement for words", true, CommitTransaction);
                     return;
                 }
 
@@ -252,34 +262,34 @@ Database::Database()
                     rc = sqlite3_bind_int(stmt_insert_words_to_paragraphs, 1, word_id);
                     if (rc != SQLITE_OK) 
                     {
-                        FailTransaction(LoadTestDataTransactionName, "Failed to bind int to prepared statement for words to paragraphs", true, CommitTransaction);
+                        FailTransaction(LoadTestDataTransactionName, rc, "Failed to bind int to prepared statement for words to paragraphs", true, CommitTransaction);
                         return;
                     }
 
                     rc = sqlite3_bind_int(stmt_insert_words_to_paragraphs, 2, paragraph_id);
                     if (rc != SQLITE_OK) 
                     {
-                        FailTransaction(LoadTestDataTransactionName, "Failed to bind int to prepared statement for words to paragraphs", true, CommitTransaction);
+                        FailTransaction(LoadTestDataTransactionName, rc, "Failed to bind int to prepared statement for words to paragraphs", true, CommitTransaction);
                         return;
                     }
 
                     rc = sqlite3_bind_int(stmt_insert_words_to_paragraphs, 3, i);
                     if (rc != SQLITE_OK) 
                     {
-                        FailTransaction(LoadTestDataTransactionName, "Failed to bind int to prepared statement for words to paragraphs", true, CommitTransaction);
+                        FailTransaction(LoadTestDataTransactionName, rc, "Failed to bind int to prepared statement for words to paragraphs", true, CommitTransaction);
                         return;
                     }
 
                     rc = sqlite3_step(stmt_insert_words_to_paragraphs);
                     if (rc != SQLITE_DONE && rc != SQLITE_CONSTRAINT) 
                     {
-                        FailTransaction(LoadTestDataTransactionName, "Failed to insert row to words to paragraphs", false, nullptr);
+                        cerr << "Err: " << rc << " Unexpected event during transaction '" << LoadTestDataTransactionName << "': Failed to insert row to words to paragraphs" << " - " << sqlite3_errmsg(db_mainThread) << endl;
                     }
 
                     rc = sqlite3_reset(stmt_insert_words_to_paragraphs);
                     if (rc != SQLITE_OK && rc != SQLITE_CONSTRAINT) 
                     {
-                        FailTransaction(LoadTestDataTransactionName, "Failed to reset prepared statement for words to paragraphs", true, CommitTransaction);
+                        FailTransaction(LoadTestDataTransactionName, rc, "Failed to reset prepared statement for words to paragraphs", true, CommitTransaction);
                         return;
                     }
                 }
@@ -289,7 +299,7 @@ Database::Database()
         rc = sqlite3_reset(stmt_insert_paragraph);
         if (rc != SQLITE_OK) 
         {
-            FailTransaction(LoadTestDataTransactionName, "Failed to reset prepared statement for paragraphs", true, CommitTransaction);
+            FailTransaction(LoadTestDataTransactionName, rc, "Failed to reset prepared statement for paragraphs", true, CommitTransaction);
             return;
         }
     }
@@ -297,33 +307,37 @@ Database::Database()
     rc = sqlite3_finalize(stmt_insert_words_to_paragraphs);
     if (rc != SQLITE_OK) 
     {
-        FailTransaction(LoadTestDataTransactionName, "Failed to finalize prepared statement for words", true, CommitTransaction);
+        FailTransaction(LoadTestDataTransactionName, rc, "Failed to finalize prepared statement for words", true, CommitTransaction);
         return;
     }
 
     rc = sqlite3_finalize(stmt_select_word);
     if (rc != SQLITE_OK) 
     {
-        FailTransaction(LoadTestDataTransactionName, "Failed to finalize prepared statement for words", true, CommitTransaction);
+        FailTransaction(LoadTestDataTransactionName, rc, "Failed to finalize prepared statement for words", true, CommitTransaction);
         return;
     }
 
     rc = sqlite3_finalize(stmt_insert_word);
     if (rc != SQLITE_OK) 
     {
-        FailTransaction(LoadTestDataTransactionName, "Failed to finalize prepared statement for words", true, CommitTransaction);
+        FailTransaction(LoadTestDataTransactionName, rc, "Failed to finalize prepared statement for words", true, CommitTransaction);
         return;
     }
 
     rc = sqlite3_finalize(stmt_insert_paragraph);
     if (rc != SQLITE_OK) 
     {
-        FailTransaction(LoadTestDataTransactionName, "Failed to finalize prepared statement for paragraphs", true, CommitTransaction);
+        FailTransaction(LoadTestDataTransactionName, rc, "Failed to finalize prepared statement for paragraphs", true, CommitTransaction);
         return;
     }
 
     if (!EndTransaction(LoadTestDataTransactionName, true))
     {
+        sqlite3_finalize(stmt_insert_paragraph);
+        sqlite3_finalize(stmt_insert_word);
+        sqlite3_finalize(stmt_select_word);
+        sqlite3_finalize(stmt_insert_words_to_paragraphs);
         return;
     }
 
@@ -346,43 +360,42 @@ Database::Database()
     sqlite3_stmt* stmt_analyze_words;
     sqlite3_stmt* stmt_analyze_words_to_paragraphs;
 
-    rc = sqlite3_prepare_v2(db, DMC_ANALYZE_PARAGRAPHS, -1, &stmt_analyze_paragraphs, 0);
+    rc = sqlite3_prepare_v2(db_mainThread, DMC_ANALYZE_PARAGRAPHS, -1, &stmt_analyze_paragraphs, 0);
     if (rc != SQLITE_OK) 
     {
-        cerr << "Err: " << rc << " Failed to prepare analyze statement for paragraphs: " << sqlite3_errmsg(db) << endl;
+        cerr << "Err: " << rc << " Failed to prepare analyze statement for paragraphs: " << sqlite3_errmsg(db_mainThread) << endl;
     } else
     {
         rc = sqlite3_step(stmt_analyze_paragraphs);
         if (rc != SQLITE_DONE) 
         {
-            cerr << "Err: " << rc << " Failed to analyze paragraphs: " << sqlite3_errmsg(db) << endl;
+            cerr << "Err: " << rc << " Failed to analyze paragraphs: " << sqlite3_errmsg(db_mainThread) << endl;
         }
-        
     }
 
-    rc = sqlite3_prepare_v2(db, DMC_ANALYZE_WORDS, -1, &stmt_analyze_words, 0);
+    rc = sqlite3_prepare_v2(db_mainThread, DMC_ANALYZE_WORDS, -1, &stmt_analyze_words, 0);
     if (rc != SQLITE_OK) 
     {
-        cerr << "Err: " << rc << " Failed to prepare analyze statement for words: " << sqlite3_errmsg(db) << endl;
+        cerr << "Err: " << rc << " Failed to prepare analyze statement for words: " << sqlite3_errmsg(db_mainThread) << endl;
     } else
     {
         rc = sqlite3_step(stmt_analyze_words);
         if (rc != SQLITE_DONE) 
         {
-            cerr << "Err: " << rc << " Failed to analyze words: " << sqlite3_errmsg(db) << endl;
+            cerr << "Err: " << rc << " Failed to analyze words: " << sqlite3_errmsg(db_mainThread) << endl;
         }
     }
 
-    rc = sqlite3_prepare_v2(db, DMC_ANALYZE_WORDS_TO_PARAGRAPHS, -1, &stmt_analyze_words_to_paragraphs, 0);
+    rc = sqlite3_prepare_v2(db_mainThread, DMC_ANALYZE_WORDS_TO_PARAGRAPHS, -1, &stmt_analyze_words_to_paragraphs, 0);
     if (rc != SQLITE_OK) 
     {
-        cerr << "Err: " << rc << " Failed to prepare analyze statement for words to paragraphs: " << sqlite3_errmsg(db) << endl;
+        cerr << "Err: " << rc << " Failed to prepare analyze statement for words to paragraphs: " << sqlite3_errmsg(db_mainThread) << endl;
     } else
     {
         rc = sqlite3_step(stmt_analyze_words_to_paragraphs);
         if (rc != SQLITE_DONE) 
         {
-            cerr << "Err: " << rc << " Failed to analyze words to paragraphs: " << sqlite3_errmsg(db) << endl;
+            cerr << "Err: " << rc << " Failed to analyze words to paragraphs: " << sqlite3_errmsg(db_mainThread) << endl;
         }
     }
 
@@ -410,13 +423,29 @@ Database* Database::Get()
 
 void Database::Destroy() 
 {
-    rc = sqlite3_close_v2(db);
+    int rc = 0;
+
+    rc = sqlite3_close_v2(db_mainThread);
     if (rc != SQLITE_OK) 
     {
-        cerr << "Err: " << rc << " Failed to close database: " << sqlite3_errmsg(db) << endl;
+        cerr << "Err: " << rc << " Failed to close database on the main thread: " << sqlite3_errmsg(db_mainThread) << endl;
     }
 
-    db = nullptr;
+    db_mainThread = nullptr;
+
+    rc = sqlite3_close_v2(db_backgroundThread);
+    if (rc != SQLITE_OK) 
+    {
+        cerr << "Err: " << rc << " Failed to close database on the background thread: " << sqlite3_errmsg(db_backgroundThread) << endl;
+    }
+
+    db_backgroundThread = nullptr;
+
+    if (errMsg)
+    {
+        free(errMsg);
+    }
+    errMsg = nullptr;
 
     if (Instance)
     {
@@ -432,7 +461,7 @@ bool Database::isValid() const
         if (!Instance)
         {
             bIsValid = false;
-        } else if(!db)
+        } else if(!db_mainThread)
         {
             bIsValid = false;
         }
@@ -442,6 +471,8 @@ bool Database::isValid() const
 
 bool Database::ExplainWordsTableQueryPlan(const string& normalized_word, const TextQueryType Type) 
 {
+    int rc = 0;
+
     if (!normalized_word.empty())
     {
         sqlite3_stmt* stmt = nullptr;
@@ -450,28 +481,28 @@ bool Database::ExplainWordsTableQueryPlan(const string& normalized_word, const T
         {
             case EXACT_MATCH:
             {
-                rc = sqlite3_prepare_v2(db, DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_EQUALS, -1, &stmt, 0);
+                rc = sqlite3_prepare_v2(db_mainThread, DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_EQUALS, -1, &stmt, 0);
                 break;
             }
             case BEGINS_WITH:
             {
-                rc = sqlite3_prepare_v2(db, DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
+                rc = sqlite3_prepare_v2(db_mainThread, DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
                 break;
             }
             case ENDS_WITH:
             {
-                rc = sqlite3_prepare_v2(db, DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
+                rc = sqlite3_prepare_v2(db_mainThread, DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
                 break;
             }
             case CONTAINS:
             {
-                rc = sqlite3_prepare_v2(db, DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
+                rc = sqlite3_prepare_v2(db_mainThread, DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
                 break;
             }
         }
         if (rc != SQLITE_OK) 
         {
-            cerr << "Err: " << rc << " Failed to prepare explain query plan statement for words: " << sqlite3_errmsg(db) << endl;
+            cerr << "Err: " << rc << " Failed to prepare explain query plan statement for words: " << sqlite3_errmsg(db_mainThread) << endl;
             sqlite3_finalize(stmt);
             return false;
         }
@@ -502,7 +533,7 @@ bool Database::ExplainWordsTableQueryPlan(const string& normalized_word, const T
         }
         if (rc != SQLITE_OK) 
         {
-            cerr << "Err: " << rc << " Failed to bind text to the explain query plan statement for words: " << sqlite3_errmsg(db) << endl;
+            cerr << "Err: " << rc << " Failed to bind text to the explain query plan statement for words: " << sqlite3_errmsg(db_mainThread) << endl;
             sqlite3_finalize(stmt);
             return false;
         }
@@ -525,7 +556,7 @@ bool Database::ExplainWordsTableQueryPlan(const string& normalized_word, const T
                 cout << "Opcode: " << opcode << " | Detail: " << detail << endl;
             } else if (rc != SQLITE_DONE) 
             {
-                cerr << "Err: " << rc << " Error while explaining query plan for word '" << normalized_word.c_str() << "': " << sqlite3_errmsg(db) << endl;
+                cerr << "Err: " << rc << " Error while explaining query plan for word '" << normalized_word.c_str() << "': " << sqlite3_errmsg(db_mainThread) << endl;
                 break;
             }
 
@@ -533,7 +564,7 @@ bool Database::ExplainWordsTableQueryPlan(const string& normalized_word, const T
 
         if (rc != SQLITE_DONE) 
         {
-            cerr << "Err: " << rc << " Error while explaining query plan for word '" << normalized_word.c_str() << "': " << sqlite3_errmsg(db) << endl;
+            cerr << "Err: " << rc << " Error while explaining query plan for word '" << normalized_word.c_str() << "': " << sqlite3_errmsg(db_mainThread) << endl;
         }
 
         sqlite3_finalize(stmt);
@@ -544,6 +575,8 @@ bool Database::ExplainWordsTableQueryPlan(const string& normalized_word, const T
 
 vector<int64_t> Database::QueryWordsTableReturnIds(const string& normalized_word, const TextQueryType Type)
 {
+    int rc = 0;
+
     vector<int64_t> results = {};
 
     if (!normalized_word.empty())
@@ -560,28 +593,28 @@ vector<int64_t> Database::QueryWordsTableReturnIds(const string& normalized_word
         {
             case EXACT_MATCH:
             {
-                rc = sqlite3_prepare_v2(db, DML_SELECT_ID_FROM_WORDS_WHERE_WORD_EQUALS, -1, &stmt, 0);
+                rc = sqlite3_prepare_v2(db_mainThread, DML_SELECT_ID_FROM_WORDS_WHERE_WORD_EQUALS, -1, &stmt, 0);
                 break;
             }
             case BEGINS_WITH:
             {
-                rc = sqlite3_prepare_v2(db, DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
+                rc = sqlite3_prepare_v2(db_mainThread, DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
                 break;
             }
             case ENDS_WITH:
             {
-                rc = sqlite3_prepare_v2(db, DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
+                rc = sqlite3_prepare_v2(db_mainThread, DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
                 break;
             }
             case CONTAINS:
             {
-                rc = sqlite3_prepare_v2(db, DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
+                rc = sqlite3_prepare_v2(db_mainThread, DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE, -1, &stmt, 0);
                 break;
             }
         }
         if (rc != SQLITE_OK) 
         {
-            cerr << "Err: " << rc << " Failed to prepare query statement for words: " << sqlite3_errmsg(db) << endl;
+            cerr << "Err: " << rc << " Failed to prepare query statement for words: " << sqlite3_errmsg(db_mainThread) << endl;
             sqlite3_finalize(stmt);
             return results;
         }
@@ -611,7 +644,7 @@ vector<int64_t> Database::QueryWordsTableReturnIds(const string& normalized_word
         }
         if (rc != SQLITE_OK) 
         {
-            cerr << "Err: " << rc << " Failed to bind text to the query statement for words: " << sqlite3_errmsg(db) << endl;
+            cerr << "Err: " << rc << " Failed to bind text to the query statement for words: " << sqlite3_errmsg(db_mainThread) << endl;
             sqlite3_finalize(stmt);
             return results;
         }
@@ -631,14 +664,14 @@ vector<int64_t> Database::QueryWordsTableReturnIds(const string& normalized_word
                 results.push_back(id);
             } else if (rc != SQLITE_DONE) 
             {
-                cerr << "Err: " << rc << " Error while querying word '" << normalized_word.c_str() << "': " << sqlite3_errmsg(db) << endl;
+                cerr << "Err: " << rc << " Error while querying word '" << normalized_word.c_str() << "': " << sqlite3_errmsg(db_mainThread) << endl;
             }
 
         } while (rc == SQLITE_ROW);
 
         if (rc != SQLITE_DONE) 
         {
-            cerr << "Err: " << rc << " Error while querying word '" << normalized_word.c_str() << "': " << sqlite3_errmsg(db) << endl;
+            cerr << "Err: " << rc << " Error while querying word '" << normalized_word.c_str() << "': " << sqlite3_errmsg(db_mainThread) << endl;
         }
 
 #ifdef DATABASE_LOG_EXECUTION_TIMES
@@ -659,14 +692,17 @@ vector<int64_t> Database::QueryWordsTableReturnIds(const string& normalized_word
     return results;
 }
 
-vector<tuple<int64_t, string, int64_t, vector<int64_t>>> Database::GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(const string& normalized_word, const TextQueryType Type)
+vector<tuple<int64_t, string, int64_t, vector<int64_t>>> Database::GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(const string& normalized_word, const TextQueryType Type, const bool UseBackgroundThread)
 {
+    int rc = 0;
     vector<tuple<int64_t, string, int64_t, vector<int64_t>>> results = {};
 
     if (normalized_word.empty())
     {
         return results;
     }
+
+    sqlite3* db = UseBackgroundThread ? db_backgroundThread : db_mainThread;
 
 #ifdef DATABASE_LOG_EXECUTION_TIMES
     chrono::_V2::system_clock::time_point t0  = chrono::_V2::system_clock::time_point();
@@ -817,7 +853,7 @@ vector<tuple<int64_t, string, int64_t, vector<int64_t>>> Database::GetAll_Paragr
 #ifdef DATABASE_LOG_EXECUTION_TIMES
     t1  = chrono::high_resolution_clock::now();
     auto duration = chrono::duration_cast<chrono::microseconds>(t1 - t0);
-    cout << "Time taken to query words to paragraphs table: " << duration.count() << " microseconds" << endl;
+    cout << "Time taken to query words to paragraphs table on " << (UseBackgroundThread ? "background" : "main") << " thread: " << duration.count() << " microseconds" << endl;
 #endif
 #ifdef DATABASE_EXPLAIN_QUERY_PLANS
     ExplainWordsTableQueryPlan(normalized_word, Type);
@@ -832,9 +868,165 @@ vector<tuple<int64_t, string, int64_t, vector<int64_t>>> Database::GetAll_Paragr
     return results;
 }
 
+// vector<tuple<int64_t, string, int64_t, vector<int64_t>, bool>> Database::GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(const string& normalized_word)
+// {
+//     int rc = 0;
+
+//     vector<tuple<int64_t, string, int64_t, vector<int64_t>, bool>> results = {};
+
+//     if (normalized_word.empty())
+//     {
+//         return results;
+//     }
+
+// #ifdef DATABASE_LOG_EXECUTION_TIMES
+//     chrono::_V2::system_clock::time_point t0  = chrono::_V2::system_clock::time_point();
+//     chrono::_V2::system_clock::time_point t1  = chrono::_V2::system_clock::time_point();
+
+//     t0  = chrono::high_resolution_clock::now();
+// #endif
+//     sqlite3_stmt* stmt = nullptr;
+
+//     rc = sqlite3_prepare_v2(db_mainThread, DML_SELECT_COMPOUND_1, -1, &stmt, 0);
+//     if (rc != SQLITE_OK) 
+//     {
+//         cerr << "Err: " << rc << " Failed to prepare query statement for words to paragraphs: " << sqlite3_errmsg(db_mainThread) << endl;
+//         sqlite3_finalize(stmt);
+//         return results;
+//     }
+
+//     rc = sqlite3_bind_text(stmt, 1, normalized_word.c_str(), -1, SQLITE_STATIC);
+//     if (rc != SQLITE_OK) 
+//     {
+//         cerr << "Err: " << rc << " Failed to bind text to the query statement for words to paragraphs: " << sqlite3_errmsg(db_mainThread) << endl;
+//         sqlite3_finalize(stmt);
+//         return results;
+//     }
+
+//     string like_string;
+
+//     if(normalized_word.size() == 1)
+//     {
+//         like_string = normalized_word + "%";
+//     } else
+//     {
+//         like_string = "%" + normalized_word + "%";
+//     }
+
+//     rc = sqlite3_bind_text(stmt, 2, like_string.c_str(), -1, SQLITE_STATIC);
+//     if (rc != SQLITE_OK) 
+//     {
+//         cerr << "Err: " << rc << " Failed to bind text to the query statement for words to paragraphs: " << sqlite3_errmsg(db_mainThread) << endl;
+//         sqlite3_finalize(stmt);
+//         return results;
+//     }
+
+//     rc = sqlite3_bind_text(stmt, 3, like_string.c_str(), -1, SQLITE_STATIC);
+//     if (rc != SQLITE_OK) 
+//     {
+//         cerr << "Err: " << rc << " Failed to bind text to the query statement for words to paragraphs: " << sqlite3_errmsg(db_mainThread) << endl;
+//         sqlite3_finalize(stmt);
+//         return results;
+//     }
+
+// #ifdef DATABASE_LOG_PREPARED_STATEMENTS
+//     const char* prepared_statement = sqlite3_expanded_sql(stmt);
+//     cout << prepared_statement << endl;
+// #endif
+
+//     int64_t paragraph_id = -1;
+//     string paragraph_text = "";
+//     int64_t word_id = 0;
+//     vector<int64_t> word_ids = {};
+//     bool is_exact_match;
+
+//     do
+//     {
+//         rc = sqlite3_step(stmt);
+
+//         if (rc == SQLITE_ROW) 
+//         {
+//             int64_t p_id = sqlite3_column_int64(stmt, 0); 
+//             const char* p_text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+//             int64_t _w_id = sqlite3_column_int64(stmt, 2);
+//             int64_t w_id = sqlite3_column_int64(stmt, 3);
+//             int64_t w_is_exact_match = sqlite3_column_int64(stmt, 4);
+
+//             if (paragraph_id == -1) 
+//             {
+//                 paragraph_id = p_id;
+//                 paragraph_text = p_text;
+//                 word_id = _w_id;
+//                 is_exact_match = w_is_exact_match;
+//                 word_ids.push_back(w_id);
+//             } else
+//             {
+//                 if (paragraph_id == p_id)
+//                 {
+//                     word_ids.push_back(w_id);
+//                 } else
+//                 {
+//                     results.push_back(tuple(paragraph_id, paragraph_text, word_id, word_ids, is_exact_match));
+//                     paragraph_id = p_id;
+//                     paragraph_text = p_text;
+//                     word_id = _w_id;
+//                     word_ids = {w_id};
+//                     is_exact_match = w_is_exact_match;
+//                 }
+//             }
+
+//         } else if (rc == SQLITE_DONE) 
+//         {
+
+//             if (paragraph_id != -1 && !word_ids.empty())
+//             {
+//                 if (results.empty())
+//                 {
+//                     results.push_back(tuple(paragraph_id, paragraph_text, word_id, word_ids, is_exact_match));
+//                 } else
+//                 {
+//                     if (get<0>(results.back()) != paragraph_id)
+//                     {
+//                         results.push_back(tuple(paragraph_id, paragraph_text, word_id, word_ids, is_exact_match));
+//                     }
+//                 }
+                
+//             }
+//         } else
+//         {
+//             cerr << "Err: " << rc << " Error while querying words to paragraphs: " << sqlite3_errmsg(db_mainThread) << endl;
+//         }
+
+//     } while (rc == SQLITE_ROW);
+
+//     if (rc != SQLITE_DONE) 
+//     {
+//         cerr << "Err: " << rc << " Error while querying words to paragraphs: " << sqlite3_errmsg(db_mainThread) << endl;
+//     }
+
+// #ifdef DATABASE_LOG_EXECUTION_TIMES
+//     t1  = chrono::high_resolution_clock::now();
+//     auto duration = chrono::duration_cast<chrono::microseconds>(t1 - t0);
+//     cout << "Time taken to query words to paragraphs table: " << duration.count() << " microseconds" << endl;
+// #endif
+// #ifdef DATABASE_EXPLAIN_QUERY_PLANS
+//     ExplainWordsTableQueryPlan(normalized_word, Type);
+//     const int scanStepsCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_FULLSCAN_STEP, 0);
+//     const int sortCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_SORT, 0);
+//     const int autoIdxCt = sqlite3_stmt_status(stmt, SQLITE_STMTSTATUS_AUTOINDEX, 0);
+
+//     cout << "Scan Steps: " << scanStepsCt << " Sort Count: " << sortCt << " Auto Index Count: " << autoIdxCt << endl;
+// #endif
+//     sqlite3_finalize(stmt);
+
+//     return results;
+// }
+
 bool Database::BeginTransaction(const string TransactionName, const bool FailureUpsetsDatabaseValidity)
 {
-    rc = sqlite3_exec(db, "BEGIN TRANSACTION;", 0, 0, &errMsg);
+    int rc = 0;
+
+    rc = sqlite3_exec(db_mainThread, "BEGIN TRANSACTION;", 0, 0, &errMsg);
     if (rc != SQLITE_OK) 
     {
         cerr << "Err: " << rc << " Failed to start transaction '" << TransactionName.c_str() << "': " << errMsg << endl;
@@ -855,9 +1047,9 @@ bool Database::BeginTransaction(const string TransactionName, const bool Failure
     }
 }
 
-bool Database::FailTransaction(const string TransactionName, const string DeveloperErrorMessage, const bool FailureUpsetsDatabaseValidity, function<bool()> callback)
+bool Database::FailTransaction(const string TransactionName, const int rc, const string DeveloperErrorMessage, const bool FailureUpsetsDatabaseValidity, function<bool()> callback)
 {
-    cerr << "Err: " << rc << " Failing transaction '" << TransactionName << "' due to: " << DeveloperErrorMessage << " - " << sqlite3_errmsg(db) << endl;
+    cerr << "Err: " << rc << " Failing transaction '" << TransactionName << "' due to: " << DeveloperErrorMessage << " - " << sqlite3_errmsg(db_mainThread) << endl;
 
     if (FailureUpsetsDatabaseValidity)
     {
@@ -875,7 +1067,9 @@ bool Database::FailTransaction(const string TransactionName, const string Develo
 
 bool Database::EndTransaction(const string TransactionName, const bool FailureUpsetsDatabaseValidity)
 {
-    rc = sqlite3_exec(db, "COMMIT TRANSACTION;", 0, 0, &errMsg);
+    int rc = 0;
+
+    rc = sqlite3_exec(db_mainThread, "COMMIT TRANSACTION;", 0, 0, &errMsg);
     if (rc != SQLITE_OK) 
     {
         cerr << "Err: " << rc << " Failed to end transaction '" << TransactionName.c_str() << "': " << errMsg << endl;

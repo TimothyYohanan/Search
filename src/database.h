@@ -17,7 +17,7 @@
 
 using namespace std;
 
-static const char*             databaseFilepath  = "database.db";
+static const char              databaseFilepath[12]  = "database.db";
 static const filesystem::path  testDataFilepath  = "../config/database_test_data.yml"; 
 
 typedef enum : uint8_t {
@@ -42,7 +42,7 @@ public:
 
     bool isValid() const;
 
-    sqlite3* sqlite3Interface() const { return db; }
+    sqlite3* sqlite3Interface() const { return db_mainThread; }
 
     bool ExplainWordsTableQueryPlan(const string& normalized_word, const TextQueryType Type);
 
@@ -54,19 +54,28 @@ public:
     * get<2>(vector[i]) = the matched word id
     * get<3>(vector[i]) = a vector containing all of the word ids in the paragraph, in the order that they occur in that paragraph
     */
-    vector<tuple<int64_t, string, int64_t, vector<int64_t>>> GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(const string& normalized_word, const TextQueryType Type);
+    vector<tuple<int64_t, string, int64_t, vector<int64_t>>> GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(const string& normalized_word, const TextQueryType Type, const bool UseBackgroundThread);
+
+    /*
+    * get<0>(vector[i]) = paragraph id (unique - each paragraph will only occur once)
+    * get<1>(vector[i]) = paragraph original text
+    * get<2>(vector[i]) = the matched word id
+    * get<3>(vector[i]) = a vector containing all of the word ids in the paragraph, in the order that they occur in that paragraph
+    * get<4>(vector[i]) = indicates wether the paragraph contains an exact match to the word, or a partial match to the word
+    */
+    // vector<tuple<int64_t, string, int64_t, vector<int64_t>, bool>> GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(const string& normalized_word);
 
     bool BeginTransaction(const string TransactionName, const bool FailureUpsetsDatabaseValidity);
 
-    bool FailTransaction(const string TransactionName, const string DeveloperErrorMessage, const bool FailureUpsetsDatabaseValidity, function<bool()> callback);
+    bool FailTransaction(const string TransactionName, const int rc, const string DeveloperErrorMessage, const bool FailureUpsetsDatabaseValidity, function<bool()> callback);
 
     bool EndTransaction(const string TransactionName, const bool FailureUpsetsDatabaseValidity);
 
 protected:
-    static Database* Instance;
-    static sqlite3* db;
-    static int rc;
     static char* errMsg;
+    static Database* Instance;
+    static sqlite3* db_mainThread;
+    static sqlite3* db_backgroundThread;
     static bool bIsValid;
 };
 

@@ -1,10 +1,17 @@
-#ifndef TABLE_PARAGRAPHS_H
-#define TABLE_PARAGRAPHS_H
+#pragma once
 
-extern const char* DDL_CREATE_TABLE_IF_NOT_EXISTS_PARAGRAPHS;
+static constexpr char DDL_CREATE_TABLE_IF_NOT_EXISTS_PARAGRAPHS[154] = R"(
+CREATE TABLE IF NOT EXISTS Paragraphs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    original_text TEXT NOT NULL,
+    normalized_text TEXT NOT NULL
+);
+)";
 
-extern const char* DMC_ANALYZE_PARAGRAPHS;
+static constexpr char DMC_ANALYZE_PARAGRAPHS[26] = R"(
+    ANALYZE Paragraphs;
+)";
 
-extern const char* DML_INSERT_PARAGRAPH;
-
-#endif
+static constexpr char DML_INSERT_PARAGRAPH[77] = R"(
+    INSERT INTO Paragraphs (original_text, normalized_text) VALUES (?, ?);
+)";

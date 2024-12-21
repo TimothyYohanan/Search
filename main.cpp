@@ -43,6 +43,7 @@ void safe_early_exit(const string& Message)
 }
 
 int loop_gui(Search* search_prechecked) {
+    
     while (!glfwWindowShouldClose(glfw_window->window)) {
 
         glfwPollEvents();
@@ -153,20 +154,20 @@ int main() {
         Database::Destroy();
         Search::Destroy();
 
+        imgui_binding.reset();
         glfw_window.reset();
         vulkan_device.reset();
-        imgui_binding.reset();
-
+        
         return EXIT_SUCCESS;
     } else
     {
         Database::Destroy();
         Search::Destroy();
 
+        imgui_binding.reset();
         glfw_window.reset();
         vulkan_device.reset();
-        imgui_binding.reset();
-
+        
         return EXIT_FAILURE;
     }
 }

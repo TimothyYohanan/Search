@@ -1,18 +1,34 @@
-#ifndef TABLE_WORDS_H
-#define TABLE_WORDS_H
+#pragma once
 
-extern const char* DDL_CREATE_TABLE_IF_NOT_EXISTS_WORDS;
+static constexpr char DDL_CREATE_TABLE_IF_NOT_EXISTS_WORDS[166] = R"(
+CREATE TABLE IF NOT EXISTS Words (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    word TEXT NOT NULL UNIQUE
+);
 
-extern const char* DMC_ANALYZE_WORDS;
+CREATE INDEX IF NOT EXISTS idx_words ON Words(word);
+)";
 
-extern const char* DML_INSERT_WORD;
+static constexpr char DMC_ANALYZE_WORDS[21] = R"(
+    ANALYZE Words;
+)";
 
-extern const char* DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_EQUALS;
+static constexpr char DML_INSERT_WORD[43] = R"(
+    INSERT INTO Words (word) VALUES (?);
+)";
 
-extern const char* DML_SELECT_ID_FROM_WORDS_WHERE_WORD_EQUALS;
+static constexpr char DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_EQUALS[62] = R"(
+    EXPLAIN QUERY PLAN SELECT id FROM Words WHERE word = ?;
+)";
 
-extern const char* DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE;
+static constexpr char DML_SELECT_ID_FROM_WORDS_WHERE_WORD_EQUALS[43] = R"(
+    SELECT id FROM Words WHERE word = ?;
+)";
 
-extern const char* DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE;
+static constexpr char DML_EXPLAIN_QUERY_PLAN_DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE[65] = R"(
+    EXPLAIN QUERY PLAN SELECT id FROM Words WHERE word LIKE ?;
+)";
 
-#endif
+static constexpr char DML_SELECT_ID_FROM_WORDS_WHERE_WORD_LIKE[46] = R"(
+    SELECT id FROM Words WHERE word LIKE ?;
+)";

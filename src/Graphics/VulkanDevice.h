@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vector>
 #include <vulkan/vulkan.h>
 
 #include "../../extern/imgui/imgui.h"
@@ -22,7 +23,6 @@ struct Vulkan_Frame {
     VkCommandPool       CommandPool;
     VkCommandBuffer     CommandBuffer;
     VkFence             Fence;
-    VkImage             Backbuffer;
     VkImageView         BackbufferView;
     VkFramebuffer       Framebuffer;
 };
@@ -37,7 +37,7 @@ public:
     friend class ImGui_Binding;
 
     VulkanDevice(ImVector<const char*> instance_extensions, GLFWwindow* window);
-    ~VulkanDevice();
+    virtual ~VulkanDevice();
 
     VkDevice        Device;
 
@@ -46,6 +46,8 @@ public:
     
     int             MinImageCount;
     bool            SwapchainRebuild;
+
+    uint32_t        getImageCount() { return ImageCount; }
 
     /*
     * DO NOT USE THIS FUNCTION UNLESS NECESSARY
@@ -67,10 +69,10 @@ public:
 protected:
     VkAllocationCallbacks*    AllocationCallbacks;
     VkInstance                Instance;
-    VkPhysicalDevice          PhysicalDevice;      // !!! NOTE: This is not explicitely cleaned up in the destructor. This is not production code. !!!
+    VkPhysicalDevice          PhysicalDevice;
     string                    PhysicalDeviceName;
     uint32_t                  QueueFamily;
-    VkQueue                   Queue;               // !!! NOTE: This is not explicitely cleaned up in the destructor. This is not production code. !!!
+    VkQueue                   Queue;
     VkDebugReportCallbackEXT  DebugReportCallbackEXT;
     VkPipelineCache           PipelineCache;
     VkCommandPool             CommandPool;
@@ -85,9 +87,11 @@ protected:
     bool                      ClearEnable;
 
     uint32_t                  ImageCount;          // Number of simultaneous in-flight frames (returned by vkGetSwapchainImagesKHR, usually derived from MinImageCount)
+    uint32_t                  SemaphoreCount;      // ImageCount + 1 (as far as I know...)
     uint32_t                  SemaphoreIndex;      // Current set of swapchain wait semaphores we're using (needs to be distinct from per frame data)
-    Vulkan_Frame*             Frames;              // Careful. There's a bit of magic going on here. We're keeping track of the ImageCount in order to manage this memory. I would do this differently for a production gui.
-    Vulkan_FrameSemaphores*   FrameSemaphores;     // Same note as with Frames.
+    vector<Vulkan_Frame>           Frames;
+    vector<Vulkan_FrameSemaphores> FrameSemaphores;
+    VkImage                   Backbuffer[16] = {};
 
     uint16_t                  Width;
     uint16_t                  Height;
@@ -110,9 +114,15 @@ protected:
 
     virtual void              createWindowCommandBuffers();
 
-    virtual void              destroyFrame(Vulkan_Frame* p);
+    virtual void              destroyFrame(Vulkan_Frame& Frame);
 
-    virtual void              destroyFrameSemaphores(Vulkan_FrameSemaphores* p);
+    virtual void              destroyAllFrames();
+
+    virtual void              destroyBackbuffer();
+
+    virtual void              destroyFrameSemaphore(Vulkan_FrameSemaphores& FrameSemaphore);
+
+    virtual void              destroyAllFrameSemaphores();
 
 private:
     /*

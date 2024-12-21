@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cstdlib>
+#include <vulkan/vulkan.h>
 
 #include "ImGuiBinding.h"
 
@@ -45,55 +46,41 @@ void ImGui_Binding::RenderFrame(ImDrawData* draw_data) const
 
     vulkan_device->check_vk_result_dev_friendly(err, "ImGui_Binding::RenderFrame() [1]");
 
-    /*
-    * POTENTIALLY DANGEROUS.
-    *
-    * I'm reviewing this code a long time after originally working it, and I'm noticing this pointer is not explicitely checked.
-    * I recall doing a lot of copying and pasting from imgui's own examples, and I *think* this is something that I copied from their examples.
-    * 
-    * The first few times it is used is preceded by 'err = ...,' which seems good.
-    * 
-    * Starting at VkRenderPassBeginInfo info, it's not obvious to me that it is being checked any more.
-    * 
-    * The gui is not too important for this project, and I'm not going to dig into this now.
-    * 
-    * Just wanted to put a note of warning here in case I publish this.
-    */
-    Vulkan_Frame* fd = &vulkan_device->Frames[vulkan_device->FrameIndex];
+    const Vulkan_Frame& fd = vulkan_device->Frames[vulkan_device->FrameIndex];
 
     {
-        err = vkWaitForFences(vulkan_device->Device, 1, &fd->Fence, VK_TRUE, UINT64_MAX);    // wait indefinitely instead of periodically checking
+        err = vkWaitForFences(vulkan_device->Device, 1, &fd.Fence, VK_TRUE, UINT64_MAX);    // wait indefinitely instead of periodically checking
         vulkan_device->check_vk_result_dev_friendly(err, "ImGui_Binding::RenderFrame() [2]");
 
-        err = vkResetFences(vulkan_device->Device, 1, &fd->Fence);
+        err = vkResetFences(vulkan_device->Device, 1, &fd.Fence);
         vulkan_device->check_vk_result_dev_friendly(err, "ImGui_Binding::RenderFrame() [3]");
     }
     {
-        err = vkResetCommandPool(vulkan_device->Device, fd->CommandPool, 0);
+        err = vkResetCommandPool(vulkan_device->Device, fd.CommandPool, 0);
         vulkan_device->check_vk_result_dev_friendly(err, "ImGui_Binding::RenderFrame() [4]");
         VkCommandBufferBeginInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         info.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        err = vkBeginCommandBuffer(fd->CommandBuffer, &info);
+        err = vkBeginCommandBuffer(fd.CommandBuffer, &info);
         vulkan_device->check_vk_result_dev_friendly(err, "ImGui_Binding::RenderFrame() [5]");
     }
     {
         VkRenderPassBeginInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         info.renderPass = vulkan_device->RenderPass;
-        info.framebuffer = fd->Framebuffer;
+        info.framebuffer = fd.Framebuffer;
         info.renderArea.extent.width = vulkan_device->Width;
         info.renderArea.extent.height = vulkan_device->Height;
         info.clearValueCount = 1;
         info.pClearValues = &vulkan_device->ClearValue;
-        vkCmdBeginRenderPass(fd->CommandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(fd.CommandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
     }
 
     // Record dear imgui primitives into command buffer
-    ImGui_ImplVulkan_RenderDrawData(draw_data, fd->CommandBuffer);
+    ImGui_ImplVulkan_RenderDrawData(draw_data, fd.CommandBuffer);
 
     // Submit command buffer
-    vkCmdEndRenderPass(fd->CommandBuffer);
+    vkCmdEndRenderPass(fd.CommandBuffer);
     {
         VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         VkSubmitInfo info = {};
@@ -102,13 +89,13 @@ void ImGui_Binding::RenderFrame(ImDrawData* draw_data) const
         info.pWaitSemaphores = &image_acquired_semaphore;
         info.pWaitDstStageMask = &wait_stage;
         info.commandBufferCount = 1;
-        info.pCommandBuffers = &fd->CommandBuffer;
+        info.pCommandBuffers = &fd.CommandBuffer;
         info.signalSemaphoreCount = 1;
         info.pSignalSemaphores = &render_complete_semaphore;
 
-        err = vkEndCommandBuffer(fd->CommandBuffer);
+        err = vkEndCommandBuffer(fd.CommandBuffer);
         vulkan_device->check_vk_result_dev_friendly(err, "ImGui_Binding::RenderFrame() [6]");
-        err = vkQueueSubmit(vulkan_device->Queue, 1, &info, fd->Fence);
+        err = vkQueueSubmit(vulkan_device->Queue, 1, &info, fd.Fence);
         vulkan_device->check_vk_result_dev_friendly(err, "ImGui_Binding::RenderFrame() [7]");
     }
 }

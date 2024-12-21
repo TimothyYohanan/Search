@@ -5,9 +5,9 @@
 // #define SEARCH_CHECK_FOR_ASSUMED_IMPOSSIBLE_ERRORS  // checks for errors that should, theoretically, never happen
 
 #include <vector>
-#include <optional>
 
 #include "database.h"
+#include "linux_threadpool.h"
 
 #include "Structures/NormalizedText.h"
 #include "Structures/WordMatch.h"
@@ -45,4 +45,6 @@ public:
 protected:
     static Search*            Instance;
     static vector<WordMatch>  SearchProgress;
+
+    static ThreadPool*        Pool;
 };

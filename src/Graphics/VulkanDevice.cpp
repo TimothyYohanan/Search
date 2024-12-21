@@ -17,8 +17,11 @@
 #ifdef VULKAN_DEBUG_REPORT    // CMake: target_compile_definitions(${PROJECT_NAME} PRIVATE VULKAN_DEBUG_REPORT)
 static VKAPI_ATTR VkBool32 VKAPI_CALL debug_report(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT objectType, uint64_t object, size_t location, int32_t messageCode, const char* pLayerPrefix, const char* pMessage, void* pUserData) 
 {
-    (void)flags; (void)object; (void)location; (void)messageCode; (void)pUserData; (void)pLayerPrefix; // Unused arguments
-    fprintf(stderr, "[vulkan] Debug report from ObjectType: %i\nMessage: %s\n\n", objectType, pMessage);
+    (void)flags; (void)object; (void)messageCode; (void)pUserData; (void)pLayerPrefix; // Unused arguments
+    if (location != 1461184347) // Ignoring an error that is due to ImGuiBinding::RenderFrame() being inefficient. 
+    {
+        fprintf(stderr, "[vulkan] Debug report from ObjectType: %i\nMessage: %s\n\n", objectType, pMessage);
+    }
     return VK_FALSE;
 }
 #endif
@@ -54,12 +57,15 @@ VulkanDevice::VulkanDevice(ImVector<const char*> instance_extensions, GLFWwindow
     ClearEnable             = true;
 
     ImageCount              = 0;
+    SemaphoreCount          = 0;
     SemaphoreIndex          = 0;
-    Frames                  = nullptr;
-    FrameSemaphores         = nullptr;
+    Frames                  = {};
+    FrameSemaphores         = {};
 
     Width                   = 0;
     Height                  = 0;
+
+    // ConsoleLogAvailableInstanceLayerProperties();
 
     createInstance(instance_extensions);
     createWindowSurface(window);
@@ -98,11 +104,20 @@ VulkanDevice::~VulkanDevice()
     for (uint32_t i = 0; i < ImageCount; ++i) 
     {
         vkWaitForFences(Device, 1, &Frames[i].Fence, VK_TRUE, UINT64_MAX);
-        destroyFrame(&Frames[i]);
-        destroyFrameSemaphores(&FrameSemaphores[i]);
     }
-    Frames = nullptr;
-    FrameSemaphores = nullptr;
+
+    destroyAllFrames();
+    
+    destroyAllFrameSemaphores();
+    vkDestroySwapchainKHR(Device, SwapchainKHR, AllocationCallbacks);
+    SwapchainKHR = nullptr;
+
+    // destroyBackbuffer(); // vkDestroySwapchainKHR takes care of this
+    // so instead, we do:
+    for (size_t i = 0; i < 16; ++i)
+    {
+        Backbuffer[i] = VK_NULL_HANDLE;
+    }
     
     vkDestroyPipeline(Device, Pipeline, AllocationCallbacks);
     Pipeline = nullptr;
@@ -116,19 +131,32 @@ VulkanDevice::~VulkanDevice()
     vkDestroyCommandPool(Device, CommandPool, AllocationCallbacks);
     CommandPool = nullptr;
 
-    // vkDestroySwapchainKHR(Device, SwapchainKHR, AllocationCallbacks);
-    // SwapchainKHR = nullptr;
-
     vkDestroyDevice(Device, AllocationCallbacks);
     Device = nullptr;
+
+    /*
+    * Spec 1.4.304 section 3.3.1 states:
+    * VkQueue objects cannot be explicitly destroyed. Instead, they are implicitly destroyed when the VkDevice object they are retrieved from is destroyed.
+    */
+    Queue = nullptr;
 
     vkDestroySurfaceKHR(Instance, SurfaceKHR, nullptr);
     SurfaceKHR = nullptr;
 
+    /*
+    * Spec 1.4.304 section 3.3.1 states:
+    * VkInstance objects can be destroyed once all VkDevice objects created from any of its VkPhysicalDevice objects have been destroyed.
+    */
     vkDestroyInstance(Instance, AllocationCallbacks);
     Instance = nullptr;
 
-    delete AllocationCallbacks;
+    /*
+    * Spec 1.4.304 section 3.3.1 states:
+    * VkPhysicalDevice objects cannot be explicitly destroyed. Instead, they are implicitly destroyed when the VkInstance object they are retrieved from is destroyed.
+    */
+    PhysicalDevice = nullptr;
+
+    free(AllocationCallbacks);
     AllocationCallbacks = nullptr;
 }
 
@@ -324,33 +352,27 @@ void VulkanDevice::endSingleTimeCommands(VkCommandBuffer& commandBuffer, VkComma
 
 void VulkanDevice::createWindowSwapChain(uint16_t width, uint16_t height, uint32_t min_image_count) 
 {
-    VkResult err = VK_SUCCESS;
+    VkResult err;
     VkSwapchainKHR old_swapchain = SwapchainKHR;
-    SwapchainKHR = nullptr;
+    SwapchainKHR = VK_NULL_HANDLE;
     err = vkDeviceWaitIdle(Device);
     check_vk_result_dev_friendly(err, "VulkanDevice::createWindowSwapChain() [1]");
 
-    for (uint32_t i = 0; i < ImageCount; i++) 
-    {
-        destroyFrame(&Frames[i]);
-        destroyFrameSemaphores(&FrameSemaphores[i]);
-    }
-    
-    IM_FREE(Frames);
-    IM_FREE(FrameSemaphores);
-    Frames = nullptr;
-    FrameSemaphores = nullptr;
+    destroyAllFrames();
+    destroyBackbuffer();
+    destroyAllFrameSemaphores();
+
     ImageCount = 0;
+
     if (RenderPass)
     {
         vkDestroyRenderPass(Device, RenderPass, AllocationCallbacks);
     }
-        
+
     if (Pipeline)
     {
         vkDestroyPipeline(Device, Pipeline, AllocationCallbacks);
     }
-        
 
     // If min image count was not specified, request different count of images dependent on selected present mode
     if (min_image_count == 0)
@@ -358,8 +380,7 @@ void VulkanDevice::createWindowSwapChain(uint16_t width, uint16_t height, uint32
         min_image_count = ImGui_ImplVulkanH_GetMinImageCountFromPresentMode(PresentModeKHR);
     }
         
-
-    // Create SwapchainKHR
+    // Create Swapchain
     {
         VkSwapchainCreateInfoKHR info = {};
         info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -378,7 +399,6 @@ void VulkanDevice::createWindowSwapChain(uint16_t width, uint16_t height, uint32
         VkSurfaceCapabilitiesKHR cap;
         err = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(PhysicalDevice, SurfaceKHR, &cap);
         check_vk_result_dev_friendly(err, "VulkanDevice::createWindowSwapChain() [2]");
-
         if (info.minImageCount < cap.minImageCount)
         {
             info.minImageCount = cap.minImageCount;
@@ -399,34 +419,22 @@ void VulkanDevice::createWindowSwapChain(uint16_t width, uint16_t height, uint32
 
         info.imageExtent.width = static_cast<uint32_t>(Width);
         info.imageExtent.height = static_cast<uint32_t>(Height);
-
         err = vkCreateSwapchainKHR(Device, &info, AllocationCallbacks, &SwapchainKHR);
         check_vk_result_dev_friendly(err, "VulkanDevice::createWindowSwapChain() [3]");
         err = vkGetSwapchainImagesKHR(Device, SwapchainKHR, &ImageCount, nullptr);
         check_vk_result_dev_friendly(err, "VulkanDevice::createWindowSwapChain() [4]");
-        VkImage backbuffers[16] = {};
         IM_ASSERT(ImageCount >= min_image_count);
-        IM_ASSERT(ImageCount < IM_ARRAYSIZE(backbuffers));
-        err = vkGetSwapchainImagesKHR(Device, SwapchainKHR, &ImageCount, backbuffers);
+        IM_ASSERT(ImageCount < 16); // 16 is the size of the backbuffer
+        err = vkGetSwapchainImagesKHR(Device, SwapchainKHR, &ImageCount, Backbuffer);
         check_vk_result_dev_friendly(err, "VulkanDevice::createWindowSwapChain() [5]");
 
-        IM_ASSERT(Frames == nullptr);
-        Frames = (Vulkan_Frame*)IM_ALLOC(sizeof(Vulkan_Frame) * ImageCount);
-        FrameSemaphores = (Vulkan_FrameSemaphores*)IM_ALLOC(sizeof(Vulkan_FrameSemaphores) * ImageCount);
-        memset(Frames, 0, sizeof(Frames[0]) * ImageCount);
-        memset(FrameSemaphores, 0, sizeof(FrameSemaphores[0]) * ImageCount);
-        for (uint32_t i = 0; i < ImageCount; i++)
-        {
-            Frames[i].Backbuffer = backbuffers[i];
-        }
-            
+        IM_ASSERT(Frames.empty() && FrameSemaphores.empty());
+        SemaphoreCount = ImageCount + 1;
+        Frames.resize(ImageCount);
+        FrameSemaphores.resize(SemaphoreCount);
     }
-
     if (old_swapchain)
-    {
         vkDestroySwapchainKHR(Device, old_swapchain, AllocationCallbacks);
-    }
-        
 
     // Create the Render Pass
     {
@@ -466,7 +474,7 @@ void VulkanDevice::createWindowSwapChain(uint16_t width, uint16_t height, uint32
 
         // We do not create a pipeline by default as this is also used by examples' main.cpp,
         // but secondary viewport in multi-viewport mode may want to create one with:
-        //ImGui_ImplVulkan_CreatePipeline(Device, AllocationCallbacks, nullptr, RenderPass, VK_SAMPLE_COUNT_1_BIT, &Pipeline, bd->Subpass);
+        //ImGui_ImplVulkan_CreatePipeline(Device, AllocationCallbacks, VK_NULL_HANDLE, RenderPass, VK_SAMPLE_COUNT_1_BIT, &Pipeline, v->Subpass);
     }
 
     // Create The Image Views
@@ -481,11 +489,10 @@ void VulkanDevice::createWindowSwapChain(uint16_t width, uint16_t height, uint32
         info.components.a = VK_COMPONENT_SWIZZLE_A;
         VkImageSubresourceRange image_range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         info.subresourceRange = image_range;
-        for (uint32_t i = 0; i < ImageCount; i++)
+        for (size_t i = 0; i < ImageCount; ++i)
         {
-            Vulkan_Frame* fd = &Frames[i];
-            info.image = fd->Backbuffer;
-            err = vkCreateImageView(Device, &info, AllocationCallbacks, &fd->BackbufferView);
+            info.image = Backbuffer[i];
+            err = vkCreateImageView(Device, &info, AllocationCallbacks, &Frames[i].BackbufferView);
             check_vk_result_dev_friendly(err, "VulkanDevice::createWindowSwapChain() [7]");
         }
     }
@@ -501,11 +508,10 @@ void VulkanDevice::createWindowSwapChain(uint16_t width, uint16_t height, uint32
         info.width = Width;
         info.height = Height;
         info.layers = 1;
-        for (uint32_t i = 0; i < ImageCount; i++)
+        for (Vulkan_Frame& Frame : Frames)
         {
-            Vulkan_Frame* fd = &Frames[i];
-            attachment[0] = fd->BackbufferView;
-            err = vkCreateFramebuffer(Device, &info, AllocationCallbacks, &fd->Framebuffer);
+            attachment[0] = Frame.BackbufferView;
+            err = vkCreateFramebuffer(Device, &info, AllocationCallbacks, &Frame.Framebuffer);
             check_vk_result_dev_friendly(err, "VulkanDevice::createWindowSwapChain() [8]");
         }
     }
@@ -513,83 +519,104 @@ void VulkanDevice::createWindowSwapChain(uint16_t width, uint16_t height, uint32
 
 void VulkanDevice::createWindowCommandBuffers() {
     VkResult err = VK_SUCCESS;
-    for (uint32_t i = 0; i < ImageCount; i++) 
+    for (Vulkan_Frame& Frame : Frames) 
     {
-        Vulkan_Frame* fd = &Frames[i];
-        Vulkan_FrameSemaphores* fsd = &FrameSemaphores[i];
         {
             VkCommandPoolCreateInfo info = {};
             info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
             info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
             info.queueFamilyIndex = QueueFamily;
-            err = vkCreateCommandPool(Device, &info, AllocationCallbacks, &fd->CommandPool);
+            err = vkCreateCommandPool(Device, &info, AllocationCallbacks, &Frame.CommandPool);
             check_vk_result_dev_friendly(err, "createWindowCommandBuffers() [1]");
         }
         {
             VkCommandBufferAllocateInfo info = {};
             info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-            info.commandPool = fd->CommandPool;
+            info.commandPool = Frame.CommandPool;
             info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
             info.commandBufferCount = 1;
-            err = vkAllocateCommandBuffers(Device, &info, &fd->CommandBuffer);
+            err = vkAllocateCommandBuffers(Device, &info, &Frame.CommandBuffer);
             check_vk_result_dev_friendly(err, "createWindowCommandBuffers() [2]");
         }
         {
             VkFenceCreateInfo info = {};
             info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
             info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-            err = vkCreateFence(Device, &info, AllocationCallbacks, &fd->Fence);
+            err = vkCreateFence(Device, &info, AllocationCallbacks, &Frame.Fence);
             check_vk_result_dev_friendly(err, "createWindowCommandBuffers() [3]");
         }
-        {
-            VkSemaphoreCreateInfo info = {};
-            info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-            err = vkCreateSemaphore(Device, &info, AllocationCallbacks, &fsd->ImageAcquiredSemaphore);
-            check_vk_result_dev_friendly(err, "createWindowCommandBuffers() [4]");
-            err = vkCreateSemaphore(Device, &info, AllocationCallbacks, &fsd->RenderCompleteSemaphore);
-            check_vk_result_dev_friendly(err, "createWindowCommandBuffers() [5]");
-        }
+    }
+
+    for (Vulkan_FrameSemaphores& FrameSemaphorePair : FrameSemaphores)
+    {
+        // VkSemaphoreTypeCreateInfo semaphore_type = {};
+        // semaphore_type.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+        // semaphore_type.semaphoreType = VK_SEMAPHORE_TYPE_BINARY;
+        // semaphore_type.initialValue = 0;
+
+        VkSemaphoreCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        // info.pNext = &semaphore_type;
+
+        err = vkCreateSemaphore(Device, &info, AllocationCallbacks, &FrameSemaphorePair.ImageAcquiredSemaphore);
+        check_vk_result_dev_friendly(err, "createWindowCommandBuffers() [4]");
+        err = vkCreateSemaphore(Device, &info, AllocationCallbacks, &FrameSemaphorePair.RenderCompleteSemaphore);
+        check_vk_result_dev_friendly(err, "createWindowCommandBuffers() [5]");
     }
 }
 
-void VulkanDevice::destroyFrame(Vulkan_Frame* p)
+void VulkanDevice::destroyFrame(Vulkan_Frame& Frame)
 {
-    if(p)
+    vkDestroyFence(Device, Frame.Fence, AllocationCallbacks);
+
+    vkFreeCommandBuffers(Device, Frame.CommandPool, 1, &Frame.CommandBuffer);
+
+    vkDestroyCommandPool(Device, Frame.CommandPool, AllocationCallbacks);
+
+    vkDestroyImageView(Device, Frame.BackbufferView, AllocationCallbacks);
+
+    Frame.Fence = VK_NULL_HANDLE;
+    Frame.CommandBuffer = VK_NULL_HANDLE;
+    Frame.CommandPool = VK_NULL_HANDLE;
+
+    vkDestroyFramebuffer(Device, Frame.Framebuffer, AllocationCallbacks);
+}
+
+void VulkanDevice::destroyAllFrames()
+{
+    for (Vulkan_Frame& Frame: Frames)
     {
-        vkDestroyFence(Device, p->Fence, AllocationCallbacks);
-        p->Fence = nullptr;
+        destroyFrame(Frame);
+    }
+    Frames.clear();
+}
 
-        vkFreeCommandBuffers(Device, p->CommandPool, 1, &p->CommandBuffer);
-        p->CommandBuffer = nullptr;
-
-        vkDestroyCommandPool(Device, p->CommandPool, AllocationCallbacks);
-        p->CommandPool = nullptr;
-
-        vkDestroyImageView(Device, p->BackbufferView, AllocationCallbacks);
-        p->BackbufferView = nullptr;
-
-        vkDestroyImage(Device, p->Backbuffer, AllocationCallbacks);
-        p->Backbuffer = nullptr;
-
-        vkDestroyFramebuffer(Device, p->Framebuffer, AllocationCallbacks);
-        p->Framebuffer = nullptr;
-
-        p = nullptr;
+void VulkanDevice::destroyBackbuffer()
+{
+    for (size_t i = 0; i < 16; ++i)
+    {
+        vkDestroyImage(Device, Backbuffer[i], AllocationCallbacks);
+        Backbuffer[i] = VK_NULL_HANDLE;
     }
 }
 
-void VulkanDevice::destroyFrameSemaphores(Vulkan_FrameSemaphores* p) 
+void VulkanDevice::destroyFrameSemaphore(Vulkan_FrameSemaphores& FrameSemaphore) 
 {
-    if(p)
+    vkDestroySemaphore(Device, FrameSemaphore.ImageAcquiredSemaphore, AllocationCallbacks);
+
+    vkDestroySemaphore(Device, FrameSemaphore.RenderCompleteSemaphore, AllocationCallbacks);
+
+    FrameSemaphore.ImageAcquiredSemaphore = VK_NULL_HANDLE;
+    FrameSemaphore.RenderCompleteSemaphore = VK_NULL_HANDLE;
+}
+
+void VulkanDevice::destroyAllFrameSemaphores() 
+{
+    for (Vulkan_FrameSemaphores& FrameSemaphore: FrameSemaphores)
     {
-        vkDestroySemaphore(Device, p->ImageAcquiredSemaphore, AllocationCallbacks);
-        p->ImageAcquiredSemaphore = nullptr;
-
-        vkDestroySemaphore(Device, p->RenderCompleteSemaphore, AllocationCallbacks);
-        p->RenderCompleteSemaphore = nullptr;
-
-        p = nullptr;
+        destroyFrameSemaphore(FrameSemaphore);
     }
+    FrameSemaphores.clear();
 }
 
 void VulkanDevice::createInstance(ImVector<const char*>& instance_extensions)
@@ -626,12 +653,12 @@ void VulkanDevice::createInstance(ImVector<const char*>& instance_extensions)
     // Enabling validation layers
     const char* layers[1];
 //     // layers[0] = "VK_KHR_portability_subset";
-// #ifdef VULKAN_DEBUG_REPORT
-//     layers[0] = "VK_LAYER_KHRONOS_validation";
-//     create_info.enabledLayerCount = 1;
-//     // create_info.ppEnabledLayerNames = layers;
-//     instance_extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
-// #endif
+#ifdef VULKAN_DEBUG_REPORT
+    layers[0] = "VK_LAYER_KHRONOS_validation";
+    create_info.enabledLayerCount = 1;
+    // create_info.ppEnabledLayerNames = layers;
+    instance_extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+#endif
     create_info.ppEnabledLayerNames = layers;
 
     // Create Vulkan Instance

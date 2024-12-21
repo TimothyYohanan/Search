@@ -18,8 +18,11 @@ Search*           Search::Instance = nullptr;
 char              Search::SearchBarBuffer[MAX_PARAGRAPH_SIZE] = "";
 vector<WordMatch> Search::SearchProgress = {};
 vector<string>    Search::SearchResults = {};
+ThreadPool*       Search::Pool = nullptr;
 
-Search::Search() { }
+Search::Search() {
+    Pool = new ThreadPool(1, 99);
+}
 
 Search* Search::Get() 
 {
@@ -33,6 +36,14 @@ Search* Search::Get()
 
 void Search::Destroy() 
 {
+    Pool->StopThreads();
+
+    if (Pool)
+    {
+        delete Pool;
+    }
+    Pool = nullptr;
+
     if (Instance)
     {
         delete Instance;
@@ -42,27 +53,52 @@ void Search::Destroy()
 
 inline const WordMatch Search::getMatches(Database* db_prechecked, const string& normalized_word)
 {
-    const vector<tuple<int64_t, string, int64_t, vector<int64_t>>> exact_matches = db_prechecked->GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(normalized_word, TextQueryType::EXACT_MATCH);
+    bool has_exact_matches;
+    int64_t exact_match_idx;
+    vector<tuple<int64_t, string, vector<int64_t>>> exact_match_data;
+    bool has_partial_matches;
+    vector<int64_t> partial_match_idxs;
+    vector<tuple<int64_t, string, vector<int64_t>>> partial_match_data;
 
-    vector<tuple<int64_t, string, int64_t, vector<int64_t>>> partial_matches = (normalized_word.size() == 1) ?
-        db_prechecked->GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(normalized_word, TextQueryType::BEGINS_WITH) :
-        db_prechecked->GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(normalized_word, TextQueryType::CONTAINS);
+    future<void> exact_matches_future = Pool->Do([db_prechecked, normalized_word, &has_exact_matches, &exact_match_idx, &exact_match_data] {
+        const vector<tuple<int64_t, string, int64_t, vector<int64_t>>> exact_matches = db_prechecked->GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(normalized_word, TextQueryType::EXACT_MATCH, true);
+        has_exact_matches = !exact_matches.empty();
 
-    if (exact_matches.empty())
-    {
-        if (!partial_matches.empty())
+        if (has_exact_matches)
         {
-            vector<int64_t> partial_match_idxs;
-            vector<tuple<int64_t, string, vector<int64_t>>> partial_match_data;
+            exact_match_idx = get<2>(exact_matches[0]);
+            exact_match_data.reserve(exact_matches.size());
 
-            partial_match_idxs.reserve(partial_matches.size());
-            partial_match_data.reserve(partial_matches.size());
-
-            for (const tuple<int64_t, string, int64_t, vector<int64_t>>& data : partial_matches)
+            for (const tuple<int64_t, string, int64_t, vector<int64_t>>& data : exact_matches)
             {
-                partial_match_idxs.push_back(get<2>(data));
-                partial_match_data.push_back(tuple(get<0>(data), get<1>(data), get<3>(data)));
+                exact_match_data.push_back(tuple(get<0>(data), get<1>(data), get<3>(data)));
             }
+        }
+    });
+
+    const vector<tuple<int64_t, string, int64_t, vector<int64_t>>> partial_matches = (normalized_word.size() == 1) ?
+        db_prechecked->GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(normalized_word, TextQueryType::BEGINS_WITH, false) :
+        db_prechecked->GetAll_ParagraphId_ParagraphOriginalText_MatchedWordId_OrderedWordsInParagraphIds(normalized_word, TextQueryType::CONTAINS, false);
+    has_partial_matches = !partial_matches.empty();
+
+    if (has_partial_matches)
+    {
+        partial_match_idxs.reserve(partial_matches.size());
+        partial_match_data.reserve(partial_matches.size());
+
+        for (const tuple<int64_t, string, int64_t, vector<int64_t>>& data : partial_matches)
+        {
+            partial_match_idxs.push_back(get<2>(data));
+            partial_match_data.push_back(tuple(get<0>(data), get<1>(data), get<3>(data)));
+        }
+    }
+    
+    exact_matches_future.get();
+
+    if (!has_exact_matches)
+    {
+        if (has_partial_matches)
+        {
             return WordMatch(normalized_word, partial_match_idxs, partial_match_data);
         } else
         {
@@ -86,28 +122,6 @@ inline const WordMatch Search::getMatches(Database* db_prechecked, const string&
         }
     }
 #endif
-
-        const int64_t exact_match_idx = get<2>(exact_matches[0]);
-        vector<tuple<int64_t, string, vector<int64_t>>> exact_match_data;
-
-        exact_match_data.reserve(exact_matches.size());
-
-        vector<int64_t> partial_match_idxs;
-        vector<tuple<int64_t, string, vector<int64_t>>> partial_match_data;
-
-        partial_match_idxs.reserve(partial_matches.size());
-        partial_match_data.reserve(partial_matches.size());
-
-        for (const tuple<int64_t, string, int64_t, vector<int64_t>>& data : exact_matches)
-        {
-            exact_match_data.push_back(tuple(get<0>(data), get<1>(data), get<3>(data)));
-        }
-
-        for (const tuple<int64_t, string, int64_t, vector<int64_t>>& data : partial_matches)
-        {
-            partial_match_idxs.push_back(get<2>(data));
-            partial_match_data.push_back(tuple(get<0>(data), get<1>(data), get<3>(data)));
-        }
         return WordMatch(normalized_word, exact_match_idx, exact_match_data, partial_match_idxs, partial_match_data);
     }
 }
@@ -209,11 +223,7 @@ int Search::searchBarInputCallback(ImGuiInputTextCallbackData* data) {
                 for (size_t i = 0; i < nWords; ++i)
                 {
                     const string& normalized_word = normalized_text.normalized_words[i];
-                    optional<WordMatch> match = getMatches(db, normalized_word);
-                    if(match)
-                    {
-                        SearchProgress.push_back(static_cast<WordMatch>(match.value()));
-                    }
+                    SearchProgress.push_back(getMatches(db, normalized_word));
                 }
             } else
             {
@@ -239,8 +249,7 @@ int Search::searchBarInputCallback(ImGuiInputTextCallbackData* data) {
                         }
                     } else
                     {
-                        const WordMatch match = getMatches(db, normalized_word);
-                        SearchProgress.push_back(match);
+                        SearchProgress.push_back(getMatches(db, normalized_word));
                     }
                 }
 
